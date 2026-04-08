@@ -4,15 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-<<<<<<< HEAD
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
-=======
-    "dev": "node ./node_modules/vite/bin/vite.js",
-    "build": "node ./node_modules/vite/bin/vite.js build",
-    "preview": "node ./node_modules/vite/bin/vite.js preview"
->>>>>>> 9d0bf112b31d9377b6ec49d3e5fdc72702671f9e
   },
   "dependencies": {
     "react": "^18.3.1",
