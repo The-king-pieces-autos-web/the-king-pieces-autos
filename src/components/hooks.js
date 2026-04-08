@@ -12,6 +12,36 @@ const LOCAL_PREFIX = 'tkpa-cache:';
 const LOCAL_WRAPPER_FLAG = '__tkpa_sync_record__';
 const REMOTE_POLL_MS = 2000;
 
+const LOCAL_ONLY_KEYS = new Set([
+  'currentUser',
+  'user',
+  'session',
+  'auth',
+  'isAuthenticated',
+  'loggedIn',
+  'activeUser',
+  'login',
+  'token',
+]);
+
+function isLocalOnlyKey(key) {
+  if (!key) return false;
+  if (LOCAL_ONLY_KEYS.has(key)) return true;
+
+  const normalized = String(key).toLowerCase();
+
+  return (
+    normalized.includes('auth') ||
+    normalized.includes('session') ||
+    normalized.includes('login') ||
+    normalized.includes('token') ||
+    normalized.includes('currentuser') ||
+    normalized.includes('activeuser') ||
+    normalized.includes('isauthenticated') ||
+    normalized.includes('loggedin')
+  );
+}
+
 const listeners = new Map();
 const stateCache = new Map();
 let syncStarted = false;
@@ -137,8 +167,8 @@ function mergeRemoteIntoCache(remotePayload, remoteUpdatedAt = 0) {
   const normalized = normalizeAppStatePayload(remotePayload);
   const remoteValues = normalized.values || {};
   const remoteMeta = normalized.meta || {};
-  const localKeys = Array.from(stateCache.keys());
-  const remoteKeys = Object.keys(remoteValues);
+  const localKeys = Array.from(stateCache.keys()).filter((key) => !isLocalOnlyKey(key));
+  const remoteKeys = Object.keys(remoteValues).filter((key) => !isLocalOnlyKey(key));
   const allKeys = new Set([...localKeys, ...remoteKeys]);
 
   allKeys.forEach((key) => {
@@ -207,7 +237,7 @@ async function flushPendingChanges() {
   if (!hasSupabaseEnv || flushInFlight || !pendingKeys.size) return;
 
   flushInFlight = true;
-  const queuedKeys = Array.from(pendingKeys);
+  const queuedKeys = Array.from(pendingKeys).filter((key) => !isLocalOnlyKey(key));
   pendingKeys.clear();
 
   try {
@@ -266,6 +296,27 @@ function applyValue(key, value, updatedAt, options = {}) {
     broadcastChange = false,
   } = options;
 
+  if (isLocalOnlyKey(key) && markDirty) {
+    const nextValue = deepClone(value);
+    const nextState = {
+      value: nextValue,
+      updatedAt: Number(updatedAt || Date.now()),
+      hasStoredValue: true,
+    };
+
+    stateCache.set(key, nextState);
+
+    if (persistLocal) {
+      writeLocalRecord(key, nextValue, nextState.updatedAt);
+    }
+
+    if (notify) {
+      notifyListeners(key, nextValue);
+    }
+
+    return;
+  }
+
   const current = stateCache.get(key);
   if (current && Number(updatedAt) < Number(current.updatedAt || 0)) return;
 
@@ -282,7 +333,7 @@ function applyValue(key, value, updatedAt, options = {}) {
     writeLocalRecord(key, nextValue, nextState.updatedAt);
   }
 
-  if (markDirty) {
+  if (markDirty && !isLocalOnlyKey(key)) {
     pendingKeys.add(key);
     scheduleFlush();
   }
@@ -291,7 +342,7 @@ function applyValue(key, value, updatedAt, options = {}) {
     notifyListeners(key, nextValue);
   }
 
-  if (broadcastChange && broadcast) {
+  if (broadcastChange && broadcast && !isLocalOnlyKey(key)) {
     broadcast.postMessage({
       key,
       value: nextValue,
@@ -308,6 +359,8 @@ function startSynchronization() {
     if (!event.key || !event.key.startsWith(LOCAL_PREFIX) || !event.newValue) return;
 
     const key = event.key.replace(LOCAL_PREFIX, '');
+    if (isLocalOnlyKey(key)) return;
+
     const parsed = safeJsonParse(event.newValue);
 
     if (parsed && parsed[LOCAL_WRAPPER_FLAG]) {
@@ -321,7 +374,8 @@ function startSynchronization() {
   if (broadcast) {
     broadcast.onmessage = (event) => {
       const payload = event.data;
-      if (!payload?.key) return;
+      if (!payload?.key || isLocalOnlyKey(payload.key)) return;
+
       applyValue(payload.key, payload.value, payload.updatedAt, {
         notify: true,
         persistLocal: true,
@@ -341,13 +395,23 @@ function startSynchronization() {
 }
 
 export function useLocalStorage(key, initialValue) {
-  startSynchronization();
+  const localOnly = isLocalOnlyKey(key);
 
-  const [value, setValueState] = useState(() =>
-    deepClone(ensureKeyState(key, initialValue).value)
-  );
+  if (!localOnly) {
+    startSynchronization();
+  }
+
+  const [value, setValueState] = useState(() => {
+    if (localOnly) {
+      return deepClone(readLocalRecord(key, initialValue).value);
+    }
+
+    return deepClone(ensureKeyState(key, initialValue).value);
+  });
 
   useEffect(() => {
+    if (localOnly) return;
+
     const unsubscribe = registerListener(key, (nextValue) => {
       setValueState(nextValue);
     });
@@ -362,9 +426,19 @@ export function useLocalStorage(key, initialValue) {
     }
 
     return unsubscribe;
-  }, [key]);
+  }, [key, localOnly]);
 
   const setValue = (updater) => {
+    if (localOnly) {
+      const previousValue = deepClone(readLocalRecord(key, initialValue).value);
+      const nextValue = typeof updater === 'function' ? updater(previousValue) : updater;
+      const updatedAt = Date.now();
+
+      setValueState(deepClone(nextValue));
+      writeLocalRecord(key, nextValue, updatedAt);
+      return;
+    }
+
     const previousValue = deepClone(ensureKeyState(key, initialValue).value);
     const nextValue = typeof updater === 'function' ? updater(previousValue) : updater;
 
