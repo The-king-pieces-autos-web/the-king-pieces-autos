@@ -2307,13 +2307,17 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
 
 
 function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clients, quotes, globalSearch, addAudit }) {
-  const createSupplierShape = (supplier = {}) => ({
-    ...supplier,
-    invoices: Array.isArray(supplier.invoices) ? supplier.invoices : [],
-    credits: Array.isArray(supplier.credits) ? supplier.credits : [],
-    paymentArchive: Array.isArray(supplier.paymentArchive) ? supplier.paymentArchive : [],
-    documents: Array.isArray(supplier.documents) ? supplier.documents : [],
-  });
+  const createSupplierShape = (supplier = {}) => {
+    const safeSupplier = supplier && typeof supplier === 'object' ? supplier : {};
+
+    return {
+      ...safeSupplier,
+      invoices: Array.isArray(safeSupplier.invoices) ? safeSupplier.invoices : [],
+      credits: Array.isArray(safeSupplier.credits) ? safeSupplier.credits : [],
+      paymentArchive: Array.isArray(safeSupplier.paymentArchive) ? safeSupplier.paymentArchive : [],
+      documents: Array.isArray(safeSupplier.documents) ? safeSupplier.documents : [],
+    };
+  };
 
 
   const safeSuppliers = Array.isArray(suppliers)
@@ -2354,7 +2358,7 @@ function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clien
   const [selectedCreditIds, setSelectedCreditIds] = useState([]);
 
   const filtered = safeSuppliers.filter((supplier) => [supplier.name, supplier.contact, supplier.billingType, supplier.paymentCycle, supplier.defaultPaymentMode].join(' ').toLowerCase().includes(String(globalSearch || '').toLowerCase()));
-  const selected = createSupplierShape(safeSuppliers.find((supplier) => supplier.id === selectedId) || filtered[0] || null);
+  const selected = createSupplierShape(safeSuppliers.find((supplier) => supplier.id === selectedId) || filtered[0] || {});
 
   useEffect(() => {
     if (!selected?.id && safeSuppliers[0]?.id) setSelectedId(safeSuppliers[0].id);
