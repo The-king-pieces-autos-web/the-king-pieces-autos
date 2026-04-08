@@ -1,0 +1,58 @@
+THE KING PIÈCES AUTOS - REMISE EN LIGNE DE ZÉRO
+
+1) SUPABASE
+- Créer un nouveau projet Supabase
+- Récupérer:
+  - Project URL
+  - Publishable key
+- Ouvrir SQL Editor
+- Coller le fichier supabase-init.sql
+- Exécuter
+- Vérifier dans Table Editor:
+  - table app_state
+  - ligne id = global
+
+2) PROJET LOCAL
+- Copier .env.example en .env
+- Remplir:
+  VITE_SUPABASE_URL=...
+  VITE_SUPABASE_PUBLISHABLE_KEY=...
+- Dans le dossier du projet:
+  npm install
+  npm run dev
+- Tester:
+  - connexion admin / admin
+  - ajout d'un produit
+  - refresh
+  - vérifier que le produit reste
+
+3) GITHUB
+- Créer un nouveau dépôt vide GitHub
+- Dans le dossier du projet:
+  git init
+  git add .
+  git commit -m "Version finale prête pour mise en ligne"
+  git branch -M main
+  git remote add origin VOTRE_URL_GITHUB.git
+  git push -u origin main
+
+4) RENDER
+- Créer un nouveau Static Site
+- Connecter le dépôt GitHub
+- Render lit normalement render.yaml automatiquement
+- Ajouter les variables d'environnement:
+  - VITE_SUPABASE_URL
+  - VITE_SUPABASE_PUBLISHABLE_KEY
+- Lancer le déploiement
+
+5) TEST FINAL EN LIGNE
+- Ouvrir le site Render
+- Se connecter avec admin / admin
+- Ajouter un produit
+- Refresh
+- Vérifier que la donnée reste
+- Ouvrir sur un autre appareil et vérifier la présence de la donnée
+
+REMARQUE
+- La session utilisateur reste locale au navigateur
+- Les données métier sont sauvegardées dans Supabase (app_state)
