@@ -1159,7 +1159,13 @@ function App() {
           <ClientsModule clients={clients} setClients={setClients} globalSearch={globalSearch} addAudit={addAudit} />
         )}
         {activeModule === 'fournisseurs' && (
+<<<<<<< HEAD
           <SuppliersModule suppliers={suppliers} setSuppliers={setSuppliers} products={products} setProducts={setProducts} clients={clients} globalSearch={globalSearch} addAudit={addAudit} />
+=======
+          <ModuleErrorBoundary>
+            <SuppliersModule suppliers={suppliers} setSuppliers={setSuppliers} products={products} setProducts={setProducts} clients={clients} globalSearch={globalSearch} addAudit={addAudit} />
+          </ModuleErrorBoundary>
+>>>>>>> 9d0bf112b31d9377b6ec49d3e5fdc72702671f9e
         )}
         {activeModule === 'finance' && (
           <FinanceModule
@@ -2300,6 +2306,7 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
 
 function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clients, quotes, globalSearch, addAudit }) {
   const createSupplierShape = (supplier = {}) => ({
+<<<<<<< HEAD
     ...supplier,
     invoices: Array.isArray(supplier.invoices) ? supplier.invoices : [],
     credits: Array.isArray(supplier.credits) ? supplier.credits : [],
@@ -2307,6 +2314,25 @@ function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clien
     documents: Array.isArray(supplier.documents) ? supplier.documents : [],
   });
 
+=======
+    ...(supplier && typeof supplier === 'object' ? supplier : {}),
+    invoices: Array.isArray(supplier?.invoices) ? supplier.invoices : [],
+    credits: Array.isArray(supplier?.credits) ? supplier.credits : [],
+    paymentArchive: Array.isArray(supplier?.paymentArchive) ? supplier.paymentArchive : [],
+    documents: Array.isArray(supplier?.documents) ? supplier.documents : [],
+    name: String(supplier?.name || ''),
+    contact: String(supplier?.contact || ''),
+    billingType: String(supplier?.billingType || 'par achat'),
+    paymentCycle: String(supplier?.paymentCycle || 'à échéance'),
+    defaultPaymentMode: String(supplier?.defaultPaymentMode || 'virement'),
+    alertDays: Number(supplier?.alertDays || 0),
+  });
+
+  const safeSuppliers = Array.isArray(suppliers)
+    ? suppliers.filter((supplier) => supplier && typeof supplier === 'object').map((supplier) => createSupplierShape(supplier))
+    : [];
+
+>>>>>>> 9d0bf112b31d9377b6ec49d3e5fdc72702671f9e
   const emptyInvoiceForm = () => ({
     number: '',
     date: today(),
@@ -2340,18 +2366,37 @@ function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clien
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
   const [selectedCreditIds, setSelectedCreditIds] = useState([]);
 
+<<<<<<< HEAD
   const filtered = suppliers.filter((s) => [s.name, s.contact, s.billingType, s.paymentCycle, s.defaultPaymentMode].join(' ').toLowerCase().includes(globalSearch.toLowerCase()));
   const selected = createSupplierShape(suppliers.find((s) => s.id === selectedId) || filtered[0] || null);
 
   useEffect(() => {
     if (!selected?.id && suppliers[0]?.id) setSelectedId(suppliers[0].id);
   }, [selected?.id, suppliers]);
+=======
+  const filtered = safeSuppliers.filter((supplier) => [supplier.name, supplier.contact, supplier.billingType, supplier.paymentCycle, supplier.defaultPaymentMode].join(' ').toLowerCase().includes(String(globalSearch || '').toLowerCase()));
+  const selected = createSupplierShape(safeSuppliers.find((supplier) => supplier.id === selectedId) || filtered[0] || null);
+
+  useEffect(() => {
+    if (!selected?.id && safeSuppliers[0]?.id) setSelectedId(safeSuppliers[0].id);
+  }, [selected?.id, safeSuppliers]);
+>>>>>>> 9d0bf112b31d9377b6ec49d3e5fdc72702671f9e
 
   useEffect(() => {
     setSelectedInvoiceIds((prev) => prev.filter((id) => selected?.invoices?.some((invoice) => invoice.id === id)));
     setSelectedCreditIds((prev) => prev.filter((id) => selected?.credits?.some((credit) => credit.id === id)));
   }, [selected?.id, selected?.invoices, selected?.credits]);
 
+<<<<<<< HEAD
+=======
+  useEffect(() => {
+    setPaymentForm((prev) => ({
+      ...prev,
+      mode: selected?.defaultPaymentMode || 'virement',
+    }));
+  }, [selected?.id, selected?.defaultPaymentMode]);
+
+>>>>>>> 9d0bf112b31d9377b6ec49d3e5fdc72702671f9e
   const resetSupplierForm = () => {
     setSupplierForm({ name: '', contact: '', billingType: 'par achat', paymentCycle: 'à échéance', defaultPaymentMode: 'virement', alertDays: 3 });
     setEditingSupplierId(null);
@@ -2411,8 +2456,20 @@ function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clien
   };
 
   const deleteSupplier = (supplierId) => {
+<<<<<<< HEAD
     setSuppliers((prev) => prev.filter((supplier) => supplier.id !== supplierId));
     if (selectedId === supplierId) setSelectedId(suppliers.find((supplier) => supplier.id !== supplierId)?.id || null);
+=======
+    setSuppliers((prev) => {
+      const nextSuppliers = prev.filter((supplier) => supplier.id !== supplierId);
+      if (selectedId === supplierId) {
+        setSelectedId(nextSuppliers[0]?.id || null);
+        setSelectedInvoiceIds([]);
+        setSelectedCreditIds([]);
+      }
+      return nextSuppliers;
+    });
+>>>>>>> 9d0bf112b31d9377b6ec49d3e5fdc72702671f9e
     if (editingSupplierId === supplierId) resetSupplierForm();
     addAudit('Suppression', 'Fournisseur');
   };

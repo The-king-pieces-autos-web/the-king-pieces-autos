@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useEffect, useState } from 'react';
 import { company } from '../data/seed';
 import {
@@ -376,6 +377,50 @@ export function useLocalStorage(key, initialValue) {
   return [value, setValue];
 }
 
+=======
+import { useEffect, useRef, useState } from 'react';
+import { company } from '../data/seed';
+
+
+const APP_STATE_ROW_ID = 'global';
+const LOCAL_PREFIX = 'tkpa-cache:';
+
+function getLocalMirror(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(`${LOCAL_PREFIX}${key}`);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function setLocalMirror(key, value) {
+  try {
+    window.localStorage.setItem(`${LOCAL_PREFIX}${key}`, JSON.stringify(value));
+  } catch {}
+}
+
+
+export function useLocalStorage(key, initialValue) {
+  const [value, setValueState] = useState(() => getLocalMirror(key, initialValue));
+
+  const setValue = (updater) => {
+    setValueState((prev) => {
+      const nextValue = typeof updater === 'function' ? updater(prev) : updater;
+      setLocalMirror(key, nextValue);
+      return nextValue;
+    });
+  };
+
+  useEffect(() => {
+    setLocalMirror(key, value);
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
+
+>>>>>>> 9d0bf112b31d9377b6ec49d3e5fdc72702671f9e
 export const formatCurrency = (value) =>
   new Intl.NumberFormat('fr-FR', {
     style: 'currency',
