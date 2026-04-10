@@ -1158,16 +1158,8 @@ function App() {
         {activeModule === 'clients' && (
           <ClientsModule clients={clients} setClients={setClients} globalSearch={globalSearch} addAudit={addAudit} />
         )}
-        {activeModule === "fournisseurs" && (
-          <SuppliersModule
-            suppliers={suppliers}
-            setSuppliers={setSuppliers}
-            products={products}
-            setProducts={setProducts}
-            clients={clients}
-            globalSearch={globalSearch}
-            addAudit={addAudit}
-          />
+        {activeModule === 'fournisseurs' && (
+          <SuppliersModule suppliers={suppliers} setSuppliers={setSuppliers} products={products} setProducts={setProducts} clients={clients} globalSearch={globalSearch} addAudit={addAudit} />
         )}
         {activeModule === 'finance' && (
           <FinanceModule
@@ -1929,10 +1921,12 @@ function QuotesModule({ quotes, setQuotes, products, clients, globalSearch, addA
 
 function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   const emptyClientForm = () => ({ name: '', phone: '', address: '', email: '' });
+  const emptyPurchaseForm = () => ({ date: today(), designation: '', quantity: 1, price: 0 });
   const [selectedClientId, setSelectedClientId] = useState(clients[0]?.id || null);
   const [clientForm, setClientForm] = useState(emptyClientForm());
   const [editingClientId, setEditingClientId] = useState(null);
-  const [purchaseForm, setPurchaseForm] = useState({ date: today(), designation: '', quantity: 1, price: 0 });
+  const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm());
+  const [editingPurchaseId, setEditingPurchaseId] = useState(null);
   const [paymentForm, setPaymentForm] = useState({ date: today(), amount: 0, mode: 'espèces', note: '', reference: '' });
   const [selectedPurchaseIds, setSelectedPurchaseIds] = useState([]);
   const [openedPaymentId, setOpenedPaymentId] = useState(null);
@@ -1968,6 +1962,8 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   useEffect(() => {
     setSelectedPaymentIds([]);
     setOpenedPaymentId(null);
+    setEditingPurchaseId(null);
+    setPurchaseForm(emptyPurchaseForm());
   }, [selected?.id]);
 
   const getPurchaseAmount = (purchase) => Number((purchase.total ?? (Number(purchase.quantity || 0) * Number(purchase.price || 0))) || 0);
@@ -1986,6 +1982,23 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   const cancelClientEdition = () => {
     setEditingClientId(null);
     setClientForm(emptyClientForm());
+  };
+
+
+  const startEditPurchase = (purchase) => {
+    if (!purchase) return;
+    setEditingPurchaseId(purchase.id);
+    setPurchaseForm({
+      date: purchase.date || today(),
+      designation: purchase.designation || '',
+      quantity: Math.max(1, Number(purchase.quantity || 1)),
+      price: Number(purchase.price || 0),
+    });
+  };
+
+  const cancelPurchaseEdition = () => {
+    setEditingPurchaseId(null);
+    setPurchaseForm(emptyPurchaseForm());
   };
 
   const saveClient = (e) => {
@@ -2032,25 +2045,73 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
     addAudit('Suppression', `Client ${client.name}`);
   };
 
-  const addPurchase = () => {
+  const savePurchase = () => {
     if (!selected) return;
+    const designation = purchaseForm.designation?.trim() || '';
+    if (!designation) return;
     const quantity = Math.max(1, Number(purchaseForm.quantity || 1));
     const price = Number(purchaseForm.price || 0);
     const total = quantity * price;
-    const purchase = {
-      id: crypto.randomUUID(),
-      date: purchaseForm.date,
-      designation: purchaseForm.designation,
-      quantity,
-      originalQuantity: quantity,
-      price,
-      total,
-      originalTotal: total,
-      status: 'non payé',
-    };
-    setClients((prev) => prev.map((c) => c.id === selected.id ? { ...c, purchases: [purchase, ...c.purchases] } : c));
-    setPurchaseForm({ date: today(), designation: '', quantity: 1, price: 0 });
-    addAudit('Ajout', `Achat client ${selected.name}`);
+
+    if (editingPurchaseId) {
+      setClients((prev) => prev.map((c) => {
+        if (c.id !== selected.id) return c;
+        return {
+          ...c,
+          purchases: (c.purchases || []).map((purchase) => {
+            if (purchase.id !== editingPurchaseId) return purchase;
+            return {
+              ...purchase,
+              date: purchaseForm.date,
+              designation,
+              quantity,
+              price,
+              total,
+              status: formatClientPurchaseStatus({ ...purchase, quantity, remainingQuantity: purchase.remainingQuantity, price }),
+            };
+          }),
+        };
+      }));
+      addAudit('Modification', `Achat client ${selected.name}`);
+    } else {
+      const purchase = {
+        id: crypto.randomUUID(),
+        date: purchaseForm.date,
+        designation,
+        quantity,
+        originalQuantity: quantity,
+        price,
+        total,
+        originalTotal: total,
+        status: 'non payé',
+      };
+      setClients((prev) => prev.map((c) => c.id === selected.id ? { ...c, purchases: [purchase, ...(c.purchases || [])] } : c));
+      addAudit('Ajout', `Achat client ${selected.name}`);
+    }
+
+    setEditingPurchaseId(null);
+    setPurchaseForm(emptyPurchaseForm());
+  };
+
+  const deletePurchase = (purchaseId) => {
+    if (!selected || !purchaseId) return;
+    const purchase = (selected.purchases || []).find((item) => item.id === purchaseId);
+    if (!purchase) return;
+    if (!window.confirm(`Supprimer l'achat "${purchase.designation}" du client ${selected.name} ?`)) return;
+
+    setClients((prev) => prev.map((c) => {
+      if (c.id !== selected.id) return c;
+      return {
+        ...c,
+        purchases: (c.purchases || []).filter((item) => item.id !== purchaseId),
+      };
+    }));
+    setSelectedPurchaseIds((prev) => prev.filter((id) => id !== purchaseId));
+    if (editingPurchaseId === purchaseId) {
+      setEditingPurchaseId(null);
+      setPurchaseForm(emptyPurchaseForm());
+    }
+    addAudit('Suppression', `Achat client ${selected.name}`);
   };
 
   const updatePurchaseField = (purchaseId, field, value) => {
@@ -2253,7 +2314,10 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
                     <input type="number" placeholder="Qté" value={purchaseForm.quantity} onChange={(e) => setPurchaseForm({ ...purchaseForm, quantity: Number(e.target.value) })} />
                     <input type="number" step="0.01" placeholder="Prix" value={purchaseForm.price} onChange={(e) => setPurchaseForm({ ...purchaseForm, price: Number(e.target.value) })} />
                   </div>
-                  <button className="secondary-btn" onClick={addPurchase}>Ajouter achat</button>
+                  <div className="inline-actions wrap-actions">
+                    <button className="secondary-btn" onClick={savePurchase}>{editingPurchaseId ? 'Enregistrer modification' : 'Ajouter achat'}</button>
+                    {editingPurchaseId && <button type="button" className="secondary-btn" onClick={cancelPurchaseEdition}>Annuler</button>}
+                  </div>
                 </div>
                 <div className="box-panel">
                   <h4>Paiements</h4>
@@ -2269,8 +2333,8 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
               </div>
               <h4>Pièces impayées / en cours</h4>
               <table>
-                <thead><tr><th></th><th>Date</th><th>Désignation</th><th>Qté</th><th>Prix unitaire actuel</th><th>Reste à payer</th><th>Statut</th></tr></thead>
-                <tbody>{selected.purchases.map((p) => <tr key={p.id}><td><input type="checkbox" checked={selectedPurchaseIds.includes(p.id)} onChange={() => togglePurchaseSelection(p.id)} /></td><td>{formatDate(p.date)}</td><td>{p.designation}</td><td><input type="number" value={p.quantity} onChange={(e) => updatePurchaseField(p.id, 'quantity', Number(e.target.value))} /></td><td><input type="number" step="0.01" value={p.price} onChange={(e) => updatePurchaseField(p.id, 'price', Number(e.target.value))} /></td><td>{formatCurrency(getPurchaseAmount(p))}</td><td>{p.status}</td></tr>)}{!selected.purchases.length && <tr><td colSpan="7">Aucun achat.</td></tr>}</tbody>
+                <thead><tr><th></th><th>Date</th><th>Désignation</th><th>Qté</th><th>Prix unitaire actuel</th><th>Reste à payer</th><th>Statut</th><th>Actions</th></tr></thead>
+                <tbody>{selected.purchases.map((p) => <tr key={p.id}><td><input type="checkbox" checked={selectedPurchaseIds.includes(p.id)} onChange={() => togglePurchaseSelection(p.id)} /></td><td>{formatDate(p.date)}</td><td>{p.designation}</td><td><input type="number" value={p.quantity} onChange={(e) => updatePurchaseField(p.id, 'quantity', Number(e.target.value))} /></td><td><input type="number" step="0.01" value={p.price} onChange={(e) => updatePurchaseField(p.id, 'price', Number(e.target.value))} /></td><td>{formatCurrency(getPurchaseAmount(p))}</td><td>{p.status}</td><td><div className="inline-actions wrap-actions"><button type="button" className="link-btn" onClick={() => startEditPurchase(p)}>Modifier</button><button type="button" className="link-btn danger-text" onClick={() => deletePurchase(p.id)}>Supprimer</button></div></td></tr>)}{!selected.purchases.length && <tr><td colSpan="8">Aucun achat.</td></tr>}</tbody>
               </table>
               <h4>Historique des paiements archivés</h4>
               <div className="inline-actions wrap-actions period-toolbar">
@@ -2307,22 +2371,13 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
 
 
 function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clients, quotes, globalSearch, addAudit }) {
-  const createSupplierShape = (supplier = {}) => {
-    const safeSupplier = supplier && typeof supplier === 'object' ? supplier : {};
-
-    return {
-      ...safeSupplier,
-      invoices: Array.isArray(safeSupplier.invoices) ? safeSupplier.invoices : [],
-      credits: Array.isArray(safeSupplier.credits) ? safeSupplier.credits : [],
-      paymentArchive: Array.isArray(safeSupplier.paymentArchive) ? safeSupplier.paymentArchive : [],
-      documents: Array.isArray(safeSupplier.documents) ? safeSupplier.documents : [],
-    };
-  };
-
-
-  const safeSuppliers = Array.isArray(suppliers)
-    ? suppliers.filter((supplier) => supplier && typeof supplier === 'object').map((supplier) => createSupplierShape(supplier))
-    : [];
+  const createSupplierShape = (supplier = {}) => ({
+    ...supplier,
+    invoices: Array.isArray(supplier.invoices) ? supplier.invoices : [],
+    credits: Array.isArray(supplier.credits) ? supplier.credits : [],
+    paymentArchive: Array.isArray(supplier.paymentArchive) ? supplier.paymentArchive : [],
+    documents: Array.isArray(supplier.documents) ? supplier.documents : [],
+  });
 
   const emptyInvoiceForm = () => ({
     number: '',
@@ -2357,27 +2412,17 @@ function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clien
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
   const [selectedCreditIds, setSelectedCreditIds] = useState([]);
 
-  const filtered = safeSuppliers.filter((supplier) => [supplier.name, supplier.contact, supplier.billingType, supplier.paymentCycle, supplier.defaultPaymentMode].join(' ').toLowerCase().includes(String(globalSearch || '').toLowerCase()));
-  const selected = createSupplierShape(safeSuppliers.find((supplier) => supplier.id === selectedId) || filtered[0] || {});
+  const filtered = suppliers.filter((s) => [s.name, s.contact, s.billingType, s.paymentCycle, s.defaultPaymentMode].join(' ').toLowerCase().includes(globalSearch.toLowerCase()));
+  const selected = createSupplierShape(suppliers.find((s) => s.id === selectedId) || filtered[0] || null);
 
   useEffect(() => {
-    if (!selected?.id && safeSuppliers[0]?.id) setSelectedId(safeSuppliers[0].id);
-  }, [selected?.id, safeSuppliers]);
-
+    if (!selected?.id && suppliers[0]?.id) setSelectedId(suppliers[0].id);
+  }, [selected?.id, suppliers]);
 
   useEffect(() => {
     setSelectedInvoiceIds((prev) => prev.filter((id) => selected?.invoices?.some((invoice) => invoice.id === id)));
     setSelectedCreditIds((prev) => prev.filter((id) => selected?.credits?.some((credit) => credit.id === id)));
   }, [selected?.id, selected?.invoices, selected?.credits]);
-
-
-
-  useEffect(() => {
-    setPaymentForm((prev) => ({
-      ...prev,
-      mode: selected?.defaultPaymentMode || 'virement',
-    }));
-  }, [selected?.id, selected?.defaultPaymentMode]);
 
   const resetSupplierForm = () => {
     setSupplierForm({ name: '', contact: '', billingType: 'par achat', paymentCycle: 'à échéance', defaultPaymentMode: 'virement', alertDays: 3 });
@@ -2438,19 +2483,8 @@ function SuppliersModule({ suppliers, setSuppliers, products, setProducts, clien
   };
 
   const deleteSupplier = (supplierId) => {
-
     setSuppliers((prev) => prev.filter((supplier) => supplier.id !== supplierId));
     if (selectedId === supplierId) setSelectedId(suppliers.find((supplier) => supplier.id !== supplierId)?.id || null);
-
-    setSuppliers((prev) => {
-      const nextSuppliers = prev.filter((supplier) => supplier.id !== supplierId);
-      if (selectedId === supplierId) {
-        setSelectedId(nextSuppliers[0]?.id || null);
-        setSelectedInvoiceIds([]);
-        setSelectedCreditIds([]);
-      }
-      return nextSuppliers;
-    });
     if (editingSupplierId === supplierId) resetSupplierForm();
     addAudit('Suppression', 'Fournisseur');
   };
