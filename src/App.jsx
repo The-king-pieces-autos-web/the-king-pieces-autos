@@ -1921,11 +1921,10 @@ function QuotesModule({ quotes, setQuotes, products, clients, globalSearch, addA
 
 function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   const emptyClientForm = () => ({ name: '', phone: '', address: '', email: '' });
-  const emptyPurchaseForm = () => ({ date: today(), designation: '', quantity: 1, price: 0 });
   const [selectedClientId, setSelectedClientId] = useState(clients[0]?.id || null);
   const [clientForm, setClientForm] = useState(emptyClientForm());
   const [editingClientId, setEditingClientId] = useState(null);
-  const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm());
+  const [purchaseForm, setPurchaseForm] = useState({ date: today(), designation: '', quantity: 1, price: 0 });
   const [editingPurchaseId, setEditingPurchaseId] = useState(null);
   const [paymentForm, setPaymentForm] = useState({ date: today(), amount: 0, mode: 'espèces', note: '', reference: '' });
   const [selectedPurchaseIds, setSelectedPurchaseIds] = useState([]);
@@ -1962,8 +1961,6 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   useEffect(() => {
     setSelectedPaymentIds([]);
     setOpenedPaymentId(null);
-    setEditingPurchaseId(null);
-    setPurchaseForm(emptyPurchaseForm());
   }, [selected?.id]);
 
   const getPurchaseAmount = (purchase) => Number((purchase.total ?? (Number(purchase.quantity || 0) * Number(purchase.price || 0))) || 0);
@@ -1982,23 +1979,6 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   const cancelClientEdition = () => {
     setEditingClientId(null);
     setClientForm(emptyClientForm());
-  };
-
-
-  const startEditPurchase = (purchase) => {
-    if (!purchase) return;
-    setEditingPurchaseId(purchase.id);
-    setPurchaseForm({
-      date: purchase.date || today(),
-      designation: purchase.designation || '',
-      quantity: Math.max(1, Number(purchase.quantity || 1)),
-      price: Number(purchase.price || 0),
-    });
-  };
-
-  const cancelPurchaseEdition = () => {
-    setEditingPurchaseId(null);
-    setPurchaseForm(emptyPurchaseForm());
   };
 
   const saveClient = (e) => {
@@ -2045,10 +2025,16 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
     addAudit('Suppression', `Client ${client.name}`);
   };
 
+  const resetPurchaseForm = () => {
+    setEditingPurchaseId(null);
+    setPurchaseForm({ date: today(), designation: '', quantity: 1, price: 0 });
+  };
+
   const savePurchase = () => {
     if (!selected) return;
-    const designation = purchaseForm.designation?.trim() || '';
+    const designation = String(purchaseForm.designation || '').trim();
     if (!designation) return;
+
     const quantity = Math.max(1, Number(purchaseForm.quantity || 1));
     const price = Number(purchaseForm.price || 0);
     const total = quantity * price;
@@ -2060,6 +2046,9 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
           ...c,
           purchases: (c.purchases || []).map((purchase) => {
             if (purchase.id !== editingPurchaseId) return purchase;
+            const currentRemainingQty = Number(purchase.remainingQuantity ?? purchase.quantity ?? quantity);
+            const quantityRatioBase = Number(purchase.quantity || quantity) || quantity;
+            const nextRemainingQty = Math.max(0, Number(((currentRemainingQty / quantityRatioBase) * quantity).toFixed(2)));
             return {
               ...purchase,
               date: purchaseForm.date,
@@ -2067,7 +2056,9 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
               quantity,
               price,
               total,
-              status: formatClientPurchaseStatus({ ...purchase, quantity, remainingQuantity: purchase.remainingQuantity, price }),
+              originalQuantity: purchase.originalQuantity ?? quantity,
+              originalTotal: purchase.originalTotal ?? total,
+              remainingQuantity: purchase.status === 'partiellement payé' ? nextRemainingQty : purchase.remainingQuantity,
             };
           }),
         };
@@ -2089,8 +2080,18 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
       addAudit('Ajout', `Achat client ${selected.name}`);
     }
 
-    setEditingPurchaseId(null);
-    setPurchaseForm(emptyPurchaseForm());
+    resetPurchaseForm();
+  };
+
+  const startEditPurchase = (purchase) => {
+    if (!purchase) return;
+    setEditingPurchaseId(purchase.id);
+    setPurchaseForm({
+      date: purchase.date || today(),
+      designation: purchase.designation || '',
+      quantity: Math.max(1, Number(purchase.quantity || 1)),
+      price: Number(purchase.price || 0),
+    });
   };
 
   const deletePurchase = (purchaseId) => {
@@ -2106,10 +2107,10 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
         purchases: (c.purchases || []).filter((item) => item.id !== purchaseId),
       };
     }));
+
     setSelectedPurchaseIds((prev) => prev.filter((id) => id !== purchaseId));
     if (editingPurchaseId === purchaseId) {
-      setEditingPurchaseId(null);
-      setPurchaseForm(emptyPurchaseForm());
+      resetPurchaseForm();
     }
     addAudit('Suppression', `Achat client ${selected.name}`);
   };
@@ -2316,7 +2317,7 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
                   </div>
                   <div className="inline-actions wrap-actions">
                     <button className="secondary-btn" onClick={savePurchase}>{editingPurchaseId ? 'Enregistrer modification' : 'Ajouter achat'}</button>
-                    {editingPurchaseId && <button type="button" className="secondary-btn" onClick={cancelPurchaseEdition}>Annuler</button>}
+                    {editingPurchaseId && <button className="secondary-btn ghost-btn" onClick={resetPurchaseForm}>Annuler</button>}
                   </div>
                 </div>
                 <div className="box-panel">
@@ -2334,7 +2335,7 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
               <h4>Pièces impayées / en cours</h4>
               <table>
                 <thead><tr><th></th><th>Date</th><th>Désignation</th><th>Qté</th><th>Prix unitaire actuel</th><th>Reste à payer</th><th>Statut</th><th>Actions</th></tr></thead>
-                <tbody>{selected.purchases.map((p) => <tr key={p.id}><td><input type="checkbox" checked={selectedPurchaseIds.includes(p.id)} onChange={() => togglePurchaseSelection(p.id)} /></td><td>{formatDate(p.date)}</td><td>{p.designation}</td><td><input type="number" value={p.quantity} onChange={(e) => updatePurchaseField(p.id, 'quantity', Number(e.target.value))} /></td><td><input type="number" step="0.01" value={p.price} onChange={(e) => updatePurchaseField(p.id, 'price', Number(e.target.value))} /></td><td>{formatCurrency(getPurchaseAmount(p))}</td><td>{p.status}</td><td><div className="inline-actions wrap-actions"><button type="button" className="link-btn" onClick={() => startEditPurchase(p)}>Modifier</button><button type="button" className="link-btn danger-text" onClick={() => deletePurchase(p.id)}>Supprimer</button></div></td></tr>)}{!selected.purchases.length && <tr><td colSpan="8">Aucun achat.</td></tr>}</tbody>
+                <tbody>{selected.purchases.map((p) => <tr key={p.id}><td><input type="checkbox" checked={selectedPurchaseIds.includes(p.id)} onChange={() => togglePurchaseSelection(p.id)} /></td><td>{formatDate(p.date)}</td><td>{p.designation}</td><td><input type="number" value={p.quantity} onChange={(e) => updatePurchaseField(p.id, 'quantity', Number(e.target.value))} /></td><td><input type="number" step="0.01" value={p.price} onChange={(e) => updatePurchaseField(p.id, 'price', Number(e.target.value))} /></td><td>{formatCurrency(getPurchaseAmount(p))}</td><td>{p.status}</td><td><button className="link-btn" onClick={() => startEditPurchase(p)}>Modifier</button><button className="link-btn danger-text" onClick={() => deletePurchase(p.id)}>Supprimer</button></td></tr>)}{!selected.purchases.length && <tr><td colSpan="8">Aucun achat.</td></tr>}</tbody>
               </table>
               <h4>Historique des paiements archivés</h4>
               <div className="inline-actions wrap-actions period-toolbar">
