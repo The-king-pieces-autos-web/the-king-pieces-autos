@@ -969,7 +969,7 @@ function allocateClientPayment(purchases, amount) {
     if (remainingAmount > 0 && unitPrice > 0 && currentRemainingQty > 0) {
       const payableQty = Math.min(currentRemainingQty, Math.floor((remainingAmount + 0.0001) / unitPrice));
       if (payableQty > 0) {
-        const paidTotal = payableQty * unitPrice;
+        const paidTotal = round2(payableQty * unitPrice);
         nextPurchase.remainingQuantity = currentRemainingQty - payableQty;
         archivedItems.push({
           purchaseId: purchase.id,
@@ -979,7 +979,7 @@ function allocateClientPayment(purchases, amount) {
           total: paidTotal,
           date: purchase.date,
         });
-        remainingAmount -= paidTotal;
+        remainingAmount = round2(remainingAmount - paidTotal);
       }
     }
     nextPurchase.status = formatClientPurchaseStatus(nextPurchase);
@@ -987,7 +987,61 @@ function allocateClientPayment(purchases, amount) {
   }
 
   const updatedPurchases = purchases.map((purchase) => updatedMap.get(purchase.id) || purchase);
-  return { updatedPurchases, archivedItems, unappliedAmount: remainingAmount };
+  return { updatedPurchases, archivedItems, unappliedAmount: round2(remainingAmount) };
+}
+
+function applyClientCreditToPurchase(client, purchase) {
+  const safeClient = client || {};
+  const safePurchase = purchase || {};
+  const availableCredit = round2(Number(safeClient.creditBalance || 0));
+  const originalTotal = round2(Number(safePurchase.total || 0));
+  const appliedCredit = Math.min(availableCredit, originalTotal);
+  const remainingTotal = round2(originalTotal - appliedCredit);
+
+  const archivedPayment = appliedCredit > 0
+    ? {
+        id: crypto.randomUUID(),
+        date: safePurchase.date || today(),
+        amount: appliedCredit,
+        appliedAmount: appliedCredit,
+        unappliedAmount: 0,
+        creditGenerated: 0,
+        mode: 'avoir client',
+        note: "Déduction automatique de l'avoir restant du client",
+        reference: 'Avoir client',
+        archivedItems: [
+          {
+            purchaseId: safePurchase.id,
+            designation: safePurchase.designation,
+            quantity: Math.max(1, Number(safePurchase.quantity || 1)),
+            unitPrice: round2(appliedCredit / Math.max(1, Number(safePurchase.quantity || 1))),
+            total: appliedCredit,
+            originalLineTotal: originalTotal,
+            sourceDate: safePurchase.date || today(),
+          },
+        ],
+        generatedByCreditUsage: true,
+      }
+    : null;
+
+  const remainingPurchase = remainingTotal > 0
+    ? {
+        ...safePurchase,
+        price: round2(remainingTotal / Math.max(1, Number(safePurchase.quantity || 1))),
+        total: remainingTotal,
+        originalTotal,
+        originalQuantity: safePurchase.originalQuantity ?? Math.max(1, Number(safePurchase.quantity || 1)),
+        remainingQuantity: Math.max(1, Number(safePurchase.quantity || 1)),
+        status: appliedCredit > 0 ? 'partiellement payé' : 'non payé',
+      }
+    : null;
+
+  return {
+    appliedCredit,
+    remainingPurchase,
+    archivedPayment,
+    nextCreditBalance: round2(availableCredit - appliedCredit),
+  };
 }
 
 
@@ -1926,7 +1980,9 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   const [editingClientId, setEditingClientId] = useState(null);
   const [purchaseForm, setPurchaseForm] = useState({ date: today(), designation: '', quantity: 1, price: 0 });
   const [editingPurchaseId, setEditingPurchaseId] = useState(null);
-  const [paymentForm, setPaymentForm] = useState({ date: today(), amount: 0, mode: 'espèces', note: '', reference: '' });
+  const emptyPaymentForm = () => ({ date: today(), amount: 0, mode: 'espèces', note: '', reference: '' });
+  const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
+  const [editingPaymentId, setEditingPaymentId] = useState(null);
   const [selectedPurchaseIds, setSelectedPurchaseIds] = useState([]);
   const [openedPaymentId, setOpenedPaymentId] = useState(null);
   const [selectedPaymentIds, setSelectedPaymentIds] = useState([]);
@@ -1961,6 +2017,8 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   useEffect(() => {
     setSelectedPaymentIds([]);
     setOpenedPaymentId(null);
+    setEditingPaymentId(null);
+    setPaymentForm(emptyPaymentForm());
   }, [selected?.id]);
 
   const getPurchaseAmount = (purchase) => Number((purchase.total ?? (Number(purchase.quantity || 0) * Number(purchase.price || 0))) || 0);
@@ -1996,7 +2054,7 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
       setSelectedClientId(editingClientId);
       addAudit('Modification', `Client ${payload.name}`);
     } else {
-      const newClient = { id: crypto.randomUUID(), ...payload, purchases: [], payments: [], archived: false };
+      const newClient = { id: crypto.randomUUID(), ...payload, purchases: [], payments: [], creditBalance: 0, archived: false };
       setClients((prev) => [newClient, ...prev]);
       setSelectedClientId(newClient.id);
       addAudit('Ajout', `Client ${newClient.name}`);
@@ -2074,10 +2132,25 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
         price,
         total,
         originalTotal: total,
+        remainingQuantity: quantity,
         status: 'non payé',
       };
-      setClients((prev) => prev.map((c) => c.id === selected.id ? { ...c, purchases: [purchase, ...(c.purchases || [])] } : c));
-      addAudit('Ajout', `Achat client ${selected.name}`);
+      const { appliedCredit, remainingPurchase, archivedPayment, nextCreditBalance } = applyClientCreditToPurchase(selected, purchase);
+      setClients((prev) => prev.map((c) => {
+        if (c.id !== selected.id) return c;
+        return {
+          ...c,
+          creditBalance: nextCreditBalance,
+          purchases: remainingPurchase ? [remainingPurchase, ...(c.purchases || [])] : [...(c.purchases || [])],
+          payments: archivedPayment ? [archivedPayment, ...(c.payments || [])] : [...(c.payments || [])],
+        };
+      }));
+      if (appliedCredit > 0) {
+        setOpenedPaymentId(archivedPayment?.id || null);
+        addAudit('Ajout', `Achat client ${selected.name} déduit de l'avoir restant`);
+      } else {
+        addAudit('Ajout', `Achat client ${selected.name}`);
+      }
     }
 
     resetPurchaseForm();
@@ -2138,11 +2211,62 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
 
   const togglePurchaseSelection = (purchaseId) => setSelectedPurchaseIds((prev) => prev.includes(purchaseId) ? prev.filter((id) => id !== purchaseId) : [...prev, purchaseId]);
 
+  const resetPaymentForm = () => {
+    setEditingPaymentId(null);
+    setPaymentForm(emptyPaymentForm());
+  };
+
+  const startEditPayment = (payment) => {
+    if (!payment) return;
+    setEditingPaymentId(payment.id);
+    setPaymentForm({
+      date: payment.date || today(),
+      amount: Number(payment.amount || 0),
+      mode: payment.mode || 'espèces',
+      note: payment.note || '',
+      reference: payment.reference || '',
+    });
+    setOpenedPaymentId(payment.id);
+  };
+
   const addPayment = () => {
     if (!selected) return;
-    let remainingAmount = Number(paymentForm.amount || 0);
-    if (remainingAmount <= 0 || !selectedPurchaseIds.length) return;
+    let enteredAmount = Number(paymentForm.amount || 0);
+    if (enteredAmount <= 0) return;
 
+    if (editingPaymentId) {
+      const existingPayment = (selected.payments || []).find((payment) => payment.id === editingPaymentId);
+      if (!existingPayment) return;
+
+      const fixedAppliedAmount = Number(existingPayment.appliedAmount || 0);
+      const nextAmount = Math.max(enteredAmount, fixedAppliedAmount);
+      const nextCreditGenerated = round2(nextAmount - fixedAppliedAmount);
+      const previousCreditGenerated = round2(Number(existingPayment.creditGenerated || 0));
+      const deltaCredit = round2(nextCreditGenerated - previousCreditGenerated);
+
+      const updatedPayment = {
+        ...existingPayment,
+        date: paymentForm.date,
+        amount: nextAmount,
+        mode: paymentForm.mode || 'espèces',
+        note: paymentForm.note || '',
+        reference: paymentForm.reference || '',
+        creditGenerated: nextCreditGenerated,
+        unappliedAmount: nextCreditGenerated,
+      };
+
+      setClients((prev) => prev.map((c) => c.id === selected.id ? {
+        ...c,
+        payments: (c.payments || []).map((payment) => payment.id === editingPaymentId ? updatedPayment : payment),
+        creditBalance: round2(Number(c.creditBalance || 0) + deltaCredit),
+      } : c));
+      setOpenedPaymentId(updatedPayment.id);
+      resetPaymentForm();
+      addAudit('Modification', `Paiement client ${selected.name}`);
+      return;
+    }
+
+    let remainingAmount = enteredAmount;
     const archivedItems = [];
     const updatedPurchases = [];
 
@@ -2187,39 +2311,54 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
       }
     }
 
-    const appliedAmount = archivedItems.reduce((sum, item) => sum + Number(item.total || 0), 0);
+    const appliedAmount = round2(archivedItems.reduce((sum, item) => sum + Number(item.total || 0), 0));
+    const creditGenerated = round2(enteredAmount - appliedAmount);
     const payment = {
       id: crypto.randomUUID(),
       ...paymentForm,
-      amount: Number(paymentForm.amount || 0),
+      amount: enteredAmount,
       appliedAmount,
-      unappliedAmount: Number(((Number(paymentForm.amount || 0)) - appliedAmount).toFixed(2)),
+      unappliedAmount: creditGenerated,
+      creditGenerated,
       archivedItems,
     };
 
-    setClients((prev) => prev.map((c) => c.id === selected.id ? { ...c, purchases: updatedPurchases, payments: [payment, ...(c.payments || [])] } : c));
-    setPaymentForm({ date: today(), amount: 0, mode: 'espèces', note: '', reference: '' });
+    setClients((prev) => prev.map((c) => c.id === selected.id ? {
+      ...c,
+      purchases: updatedPurchases,
+      payments: [payment, ...(c.payments || [])],
+      creditBalance: round2(Number(c.creditBalance || 0) + creditGenerated),
+    } : c));
+    resetPaymentForm();
     setSelectedPurchaseIds([]);
     setOpenedPaymentId(payment.id);
-    addAudit('Ajout', `Paiement client ${selected.name}`);
+    addAudit('Ajout', creditGenerated > 0 ? `Paiement client ${selected.name} avec création d'avoir` : `Paiement client ${selected.name}`);
   };
 
-  const printClientPayment = (payment) => {
+  const printClientPayment =  const printClientPayment = (payment) => {
     const rows = (payment.archivedItems || []).map((item) => `<tr><td>${item.designation}</td><td>${item.quantity}</td><td>${formatCurrency(item.unitPrice)}</td><td>${formatCurrency(item.total)}</td></tr>`).join('');
-    printHTML(`Paiement client ${selected?.name || ''}`, `<h2>Paiement client - ${selected?.name || ''}</h2><table><tbody><tr><th>Date</th><td>${formatDate(payment.date)}</td><th>Mode</th><td>${payment.mode}</td></tr><tr><th>Montant versé</th><td>${formatCurrency(payment.amount)}</td><th>Montant affecté</th><td>${formatCurrency(payment.appliedAmount || 0)}</td></tr><tr><th>Référence</th><td>${payment.reference || '-'}</td><th>Remarque</th><td>${payment.note || '-'}</td></tr></tbody></table><h3>Pièces archivées avec ce paiement</h3><table><thead><tr><th>Désignation</th><th>Qté</th><th>Prix payé</th><th>Total payé</th></tr></thead><tbody>${rows || "<tr><td colspan='4'>Aucune pièce couverte.</td></tr>"}</tbody></table>`);
+    printHTML(`Paiement client ${selected?.name || ''}`, `<h2>Paiement client - ${selected?.name || ''}</h2><table><tbody><tr><th>Date</th><td>${formatDate(payment.date)}</td><th>Mode</th><td>${payment.mode}</td></tr><tr><th>Montant versé</th><td>${formatCurrency(payment.amount)}</td><th>Montant affecté</th><td>${formatCurrency(payment.appliedAmount || 0)}</td></tr><tr><th>Avoir créé</th><td>${formatCurrency(payment.creditGenerated || 0)}</td><th>Référence</th><td>${payment.reference || '-'}</td></tr><tr><th>Remarque</th><td colspan="3">${payment.note || '-'}</td></tr></tbody></table><h3>Pièces archivées avec ce paiement</h3><table><thead><tr><th>Désignation</th><th>Qté</th><th>Prix payé</th><th>Total payé</th></tr></thead><tbody>${rows || "<tr><td colspan='4'>Aucune pièce couverte. Paiement enregistré comme avance / avoir client.</td></tr>"}</tbody></table>`);
   };
 
   const togglePaymentSelection = (paymentId) => setSelectedPaymentIds((prev) => prev.includes(paymentId) ? prev.filter((id) => id !== paymentId) : [...prev, paymentId]);
 
   const deletePaymentHistory = (paymentIds) => {
     if (!selected || !paymentIds.length) return;
-    setClients((prev) => prev.map((c) => c.id === selected.id ? { ...c, payments: (c.payments || []).filter((payment) => !paymentIds.includes(payment.id)) } : c));
+    const paymentsToDelete = (selected.payments || []).filter((payment) => paymentIds.includes(payment.id));
+    const creditToRemove = round2(paymentsToDelete.reduce((sum, payment) => sum + Number(payment.creditGenerated || 0), 0));
+
+    setClients((prev) => prev.map((c) => c.id === selected.id ? {
+      ...c,
+      payments: (c.payments || []).filter((payment) => !paymentIds.includes(payment.id)),
+      creditBalance: round2(Math.max(0, Number(c.creditBalance || 0) - creditToRemove)),
+    } : c));
     setSelectedPaymentIds((prev) => prev.filter((id) => !paymentIds.includes(id)));
     if (paymentIds.includes(openedPaymentId)) setOpenedPaymentId(null);
+    if (paymentIds.includes(editingPaymentId)) resetPaymentForm();
     addAudit('Suppression', `Historique paiement client ${selected.name}`);
   };
 
-  const printClientPayments = (paymentsToPrint, titleSuffix) => {
+  const printClientPayments =  const printClientPayments = (paymentsToPrint, titleSuffix) => {
     if (!selected) return;
     const blocks = (paymentsToPrint || []).map((payment) => {
       const rows = (payment.archivedItems || []).map((item) => `<tr><td>${item.designation}</td><td>${item.quantity}</td><td>${formatCurrency(item.unitPrice)}</td><td>${formatCurrency(item.total)}</td></tr>`).join('');
@@ -2228,10 +2367,11 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
           <h3>Paiement du ${formatDate(payment.date)}</h3>
           <table><tbody>
             <tr><th>Montant versé</th><td>${formatCurrency(payment.amount)}</td><th>Montant affecté</th><td>${formatCurrency(payment.appliedAmount || 0)}</td></tr>
-            <tr><th>Mode</th><td>${payment.mode}</td><th>Référence</th><td>${payment.reference || '-'}</td></tr>
+            <tr><th>Avoir créé</th><td>${formatCurrency(payment.creditGenerated || 0)}</td><th>Mode</th><td>${payment.mode}</td></tr>
+            <tr><th>Référence</th><td>${payment.reference || '-'}</td><th>Remarque</th><td>${payment.note || '-'}</td></tr>
             <tr><th>Remarque</th><td colspan="3">${payment.note || '-'}</td></tr>
           </tbody></table>
-          <table><thead><tr><th>Pièce</th><th>Qté</th><th>Prix payé par pièce</th><th>Total payé</th></tr></thead><tbody>${rows || "<tr><td colspan='4'>Aucune pièce.</td></tr>"}</tbody></table>
+          <table><thead><tr><th>Pièce</th><th>Qté</th><th>Prix payé par pièce</th><th>Total payé</th></tr></thead><tbody>${rows || "<tr><td colspan='4'>Aucune pièce. Paiement enregistré comme avance / avoir client.</td></tr>"}</tbody></table>
         </div>`;
     }).join('');
     printHTML(`Paiements client ${selected.name}`, `<h2>Historique paiements - ${selected.name}</h2><div class="muted">${titleSuffix}</div>${blocks || '<p>Aucun paiement.</p>'}`);
@@ -2257,6 +2397,8 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
   };
 
   const due = selected ? selected.purchases.reduce((s, p) => s + getPurchaseAmount(p), 0) : 0;
+  const clientCreditBalance = selected ? round2(Number(selected.creditBalance || 0)) : 0;
+  const netDue = Math.max(0, round2(due - clientCreditBalance));
   const archivedTotal = selected ? selected.payments.reduce((sum, payment) => sum + Number(payment.appliedAmount || 0), 0) : 0;
   const selectedPiecesTotal = selected ? selected.purchases.filter((p) => selectedPurchaseIds.includes(p.id)).reduce((sum, p) => sum + getPurchaseAmount(p), 0) : 0;
 
@@ -2300,6 +2442,8 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
                 <div><strong>Adresse</strong><span>{selected.address}</span></div>
                 <div><strong>Email</strong><span>{selected.email}</span></div>
                 <div><strong>Montant dû</strong><span>{formatCurrency(due)}</span></div>
+                <div><strong>Avoir restant</strong><span>{formatCurrency(clientCreditBalance)}</span></div>
+                <div><strong>Reste net à payer</strong><span>{formatCurrency(netDue)}</span></div>
                 <div><strong>Total archivé payé</strong><span>{formatCurrency(archivedTotal)}</span></div><div><strong>Total sélectionné</strong><span>{formatCurrency(selectedPiecesTotal)}</span></div>
               </div>
               <div className="inline-actions wrap-actions" style={{ marginBottom: 16 }}>
@@ -2329,7 +2473,7 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
                     <input placeholder="Référence" value={paymentForm.reference} onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })} />
                     <input placeholder="Remarque" value={paymentForm.note} onChange={(e) => setPaymentForm({ ...paymentForm, note: e.target.value })} />
                   </div>
-                  <div className="hint">La sélection des pièces se fait automatiquement selon le montant payé. La dernière pièce peut être coupée : la partie payée va en archive et le reste reste en impayé.</div><div className="hint">Pièces auto-sélectionnées : {selectedPurchaseIds.length}</div><button className="secondary-btn" onClick={addPayment}>Enregistrer paiement</button>
+                  <div className="hint">La sélection des pièces se fait automatiquement selon le montant payé. La dernière pièce peut être coupée : la partie payée va en archive et le reste reste en impayé.</div><div className="hint">Pièces auto-sélectionnées : {selectedPurchaseIds.length}</div><div className="hint">Avoir disponible du client : {formatCurrency(clientCreditBalance)}</div><div className="hint">Tu peux aussi enregistrer un paiement même sans pièce : il sera ajouté comme avance / avoir client.</div><div className="inline-actions wrap-actions"><button className="secondary-btn" onClick={addPayment}>{editingPaymentId ? 'Enregistrer la modification' : 'Enregistrer paiement'}</button>{editingPaymentId && <button type="button" className="secondary-btn" onClick={resetPaymentForm}>Annuler</button>}</div>
                 </div>
               </div>
               <h4>Pièces impayées / en cours</h4>
@@ -2357,10 +2501,10 @@ function ClientsModule({ clients, setClients, globalSearch, addAudit }) {
                 </div>
               </div>
               <table>
-                <thead><tr><th></th><th>Date</th><th>Montant versé</th><th>Montant affecté</th><th>Mode</th><th>Référence</th><th>Pièces archivées</th><th>Actions</th></tr></thead>
-                <tbody>{selected.payments.map((p) => <tr key={p.id} className={openedPaymentId === p.id ? 'selected-row' : ''}><td><input type="checkbox" checked={selectedPaymentIds.includes(p.id)} onChange={() => togglePaymentSelection(p.id)} /></td><td>{formatDate(p.date)}</td><td>{formatCurrency(p.amount)}</td><td>{formatCurrency(p.appliedAmount || 0)}</td><td>{p.mode}</td><td>{p.reference}</td><td>{(p.archivedItems || []).map((item) => `${item.designation} - ${formatCurrency(item.total)}`).join(', ') || '-'}</td><td><button className="link-btn" onClick={() => setOpenedPaymentId(p.id)}>Ouvrir</button><button className="link-btn" onClick={() => printClientPayment(p)}>Imprimer</button><button className="link-btn danger-text" onClick={() => deletePaymentHistory([p.id])}>Supprimer</button></td></tr>)}{!selected.payments.length && <tr><td colSpan="8">Aucun paiement.</td></tr>}</tbody>
+                <thead><tr><th></th><th>Date</th><th>Montant versé</th><th>Montant affecté</th><th>Avoir créé</th><th>Mode</th><th>Référence</th><th>Pièces archivées</th><th>Actions</th></tr></thead>
+                <tbody>{selected.payments.map((p) => <tr key={p.id} className={openedPaymentId === p.id ? 'selected-row' : ''}><td><input type="checkbox" checked={selectedPaymentIds.includes(p.id)} onChange={() => togglePaymentSelection(p.id)} /></td><td>{formatDate(p.date)}</td><td>{formatCurrency(p.amount)}</td><td>{formatCurrency(p.appliedAmount || 0)}</td><td>{formatCurrency(p.creditGenerated || 0)}</td><td>{p.mode}</td><td>{p.reference}</td><td>{(p.archivedItems || []).map((item) => `${item.designation} - ${formatCurrency(item.total)}`).join(', ') || 'Paiement sans pièce / avance client'}</td><td><button className="link-btn" onClick={() => setOpenedPaymentId(p.id)}>Ouvrir</button><button className="link-btn" onClick={() => startEditPayment(p)}>Modifier</button><button className="link-btn" onClick={() => printClientPayment(p)}>Imprimer</button><button className="link-btn danger-text" onClick={() => deletePaymentHistory([p.id])}>Supprimer</button></td></tr>)}{!selected.payments.length && <tr><td colSpan="9">Aucun paiement.</td></tr>}</tbody>
               </table>
-              {openedPayment && <div className="box-panel"><h4>Détail du paiement archivé</h4><div className="info-grid"><div><strong>Date du paiement</strong><span>{formatDate(openedPayment.date)}</span></div><div><strong>Montant payé</strong><span>{formatCurrency(openedPayment.amount)}</span></div><div><strong>Montant affecté</strong><span>{formatCurrency(openedPayment.appliedAmount || 0)}</span></div><div><strong>Mode</strong><span>{openedPayment.mode}</span></div></div><table><thead><tr><th>Pièce</th><th>Qté</th><th>Prix payé par pièce</th><th>Montant payé</th></tr></thead><tbody>{(openedPayment.archivedItems || []).map((item, index) => <tr key={`${openedPayment.id}-${index}`}><td>{item.designation}</td><td>{item.quantity}</td><td>{formatCurrency(item.unitPrice)}</td><td>{formatCurrency(item.total)}</td></tr>)}{!(openedPayment.archivedItems || []).length && <tr><td colSpan="4">Aucune pièce archivée.</td></tr>}</tbody></table></div>}            </>
+              {openedPayment && <div className="box-panel"><h4>Détail du paiement archivé</h4><div className="info-grid"><div><strong>Date du paiement</strong><span>{formatDate(openedPayment.date)}</span></div><div><strong>Montant payé</strong><span>{formatCurrency(openedPayment.amount)}</span></div><div><strong>Montant affecté</strong><span>{formatCurrency(openedPayment.appliedAmount || 0)}</span></div><div><strong>Avoir créé</strong><span>{formatCurrency(openedPayment.creditGenerated || 0)}</span></div><div><strong>Mode</strong><span>{openedPayment.mode}</span></div></div><table><thead><tr><th>Pièce</th><th>Qté</th><th>Prix payé par pièce</th><th>Montant payé</th></tr></thead><tbody>{(openedPayment.archivedItems || []).map((item, index) => <tr key={`${openedPayment.id}-${index}`}><td>{item.designation}</td><td>{item.quantity}</td><td>{formatCurrency(item.unitPrice)}</td><td>{formatCurrency(item.total)}</td></tr>)}{!(openedPayment.archivedItems || []).length && <tr><td colSpan="4">Aucune pièce archivée. Paiement enregistré comme avance / avoir client.</td></tr>}</tbody></table></div>}            </>
           ) : <div>Sélectionne un client.</div>}
         </section>
       </div>
