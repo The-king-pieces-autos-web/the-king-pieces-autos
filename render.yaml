@@ -1,0 +1,10 @@
+services:
+  - type: static_site
+    name: the-king-pieces-autos
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
