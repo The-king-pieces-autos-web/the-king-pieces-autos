@@ -37,9 +37,19 @@ const CATALOGUE = {
 const MODULES = ["Stock", "Stock à commander", "Devis", "Clients", "Utilisateurs", "Historique"];
 
 export default function App() {
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] = useState(() => {
+    return localStorage.getItem("king_current_user") ? true : false;
+  });
   const [appLoaded, setAppLoaded] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    const savedUser = localStorage.getItem("king_current_user");
+    try {
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch {
+      localStorage.removeItem("king_current_user");
+      return null;
+    }
+  });
   const [login, setLogin] = useState("admin");
   const [password, setPassword] = useState("admin123");
 
@@ -130,6 +140,15 @@ export default function App() {
   const familles = Object.keys(CATALOGUE);
   const sousFamillesDisponibles = form.famille ? CATALOGUE[form.famille] || [] : [];
   const isAdmin = currentUser?.role === "Admin";
+  const visibleModules = isAdmin
+    ? MODULES
+    : MODULES.filter((module) => module !== "Utilisateurs" && module !== "Historique");
+
+  useEffect(() => {
+    if (!isAdmin && (moduleActif === "Utilisateurs" || moduleActif === "Historique")) {
+      setModuleActif("Stock");
+    }
+  }, [isAdmin, moduleActif]);
 
   useEffect(() => {
     async function startApp() {
@@ -151,6 +170,27 @@ export default function App() {
 
         if (!usersError && remoteUsers?.length) {
           setUsers(remoteUsers);
+
+          const savedUser = localStorage.getItem("king_current_user");
+          if (savedUser) {
+            try {
+              const parsedUser = JSON.parse(savedUser);
+              const freshUser = remoteUsers.find((u) => u.id === parsedUser.id || u.login === parsedUser.login);
+              if (freshUser) {
+                setCurrentUser(freshUser);
+                localStorage.setItem("king_current_user", JSON.stringify(freshUser));
+                setConnected(true);
+              } else {
+                localStorage.removeItem("king_current_user");
+                setCurrentUser(null);
+                setConnected(false);
+              }
+            } catch {
+              localStorage.removeItem("king_current_user");
+              setCurrentUser(null);
+              setConnected(false);
+            }
+          }
         } else {
           setUsers(DEFAULT_USERS);
         }
@@ -297,6 +337,7 @@ export default function App() {
 
       if (!error && remoteUser) {
         setCurrentUser(remoteUser);
+        localStorage.setItem("king_current_user", JSON.stringify(remoteUser));
         setConnected(true);
         setModuleActif("Stock");
 
@@ -321,6 +362,7 @@ export default function App() {
     if (!user) return alert("Identifiant ou mot de passe incorrect.");
 
     setCurrentUser(user);
+    localStorage.setItem("king_current_user", JSON.stringify(user));
     setConnected(true);
     setModuleActif("Stock");
   }
@@ -1745,7 +1787,7 @@ export default function App() {
         </div>
 
         <nav className="moduleMenu">
-          {MODULES.map((module) => (
+          {visibleModules.map((module) => (
             <button key={module} className={moduleActif === module ? "active" : ""} onClick={() => setModuleActif(module)}>
               {module}
             </button>
@@ -1756,7 +1798,16 @@ export default function App() {
           <h3>Sauvegarde</h3>
           <button onClick={exportBackup}>Exporter</button>
           <label>Restaurer<input type="file" accept=".json" onChange={importBackup} hidden /></label>
-          <button onClick={() => setConnected(false)}>Déconnexion</button>
+          <button
+            onClick={() => {
+              localStorage.removeItem("king_current_user");
+              setCurrentUser(null);
+              setConnected(false);
+              setModuleActif("Stock");
+            }}
+          >
+            Déconnexion
+          </button>
         </div>
 
         <div className="sidebarAlert"><strong>{ruptures.length}</strong><span>pièce(s) à commander</span></div>
@@ -2346,7 +2397,7 @@ export default function App() {
           </>
         )}
 
-        {moduleActif === "Utilisateurs" && (
+        {isAdmin && moduleActif === "Utilisateurs" && (
           <section className="panel stockPanel">
             <div className="panelTitle"><span>01</span><div><h3>Comptes salariés</h3><p>Créer, modifier et supprimer les comptes.</p></div></div>
             {!isAdmin && <div className="empty">Seul l’administrateur peut gérer les comptes.</div>}
@@ -2371,7 +2422,7 @@ export default function App() {
           </section>
         )}
 
-        {moduleActif === "Historique" && (
+        {isAdmin && moduleActif === "Historique" && (
           <section className="panel stockPanel">
             <div className="panelTitle"><span>01</span><div><h3>Historique d’activité</h3><p>Suivi de ce que chaque salarié fait.</p></div></div>
             {history.length === 0 && <div className="empty">Aucune action enregistrée.</div>}
