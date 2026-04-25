@@ -2,6 +2,7 @@ import "./styles.css";
 import { useEffect, useMemo, useState } from "react";
 import logo from "./assets/logo.png";
 import loginBg from "./assets/dashboard-hero.jpeg";
+import { supabase, loadAppState, saveAppState } from "./lib/supabase";
 
 const DEFAULT_USERS = [
   { id: 1, login: "admin", password: "admin123", name: "Administrateur", role: "Admin" },
@@ -37,6 +38,7 @@ const MODULES = ["Stock", "Stock à commander", "Devis", "Clients", "Utilisateur
 
 export default function App() {
   const [connected, setConnected] = useState(false);
+  const [appLoaded, setAppLoaded] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [login, setLogin] = useState("admin");
   const [password, setPassword] = useState("admin123");
@@ -130,40 +132,90 @@ export default function App() {
   const isAdmin = currentUser?.role === "Admin";
 
   useEffect(() => {
-    const saved = localStorage.getItem("king_app_full");
-    if (saved) {
+    async function startApp() {
       try {
-        const data = JSON.parse(saved);
-        setUsers(data.users?.length ? data.users : DEFAULT_USERS);
-        setPieces(data.pieces || []);
-        setHistory(data.history || []);
-        setManualOrders(data.manualOrders || []);
-        setOrderedAutoIds(data.orderedAutoIds || []);
-        setOrderArchives(data.orderArchives || []);
-        setDevis(data.devis || []);
-        setClients(data.clients || []);
-      } catch {
-        localStorage.removeItem("king_app_full");
+        const remoteState = await loadAppState();
+
+        setPieces(remoteState.pieces || []);
+        setHistory(remoteState.history || []);
+        setManualOrders(remoteState.manualOrders || []);
+        setOrderedAutoIds(remoteState.orderedAutoIds || []);
+        setOrderArchives(remoteState.orderArchives || []);
+        setDevis(remoteState.devis || []);
+        setClients(remoteState.clients || []);
+
+        const { data: remoteUsers, error: usersError } = await supabase
+          .from("users_app")
+          .select("*")
+          .order("id", { ascending: true });
+
+        if (!usersError && remoteUsers?.length) {
+          setUsers(remoteUsers);
+        } else {
+          setUsers(DEFAULT_USERS);
+        }
+
+        localStorage.setItem(
+          "king_app_full",
+          JSON.stringify({
+            users: remoteUsers?.length ? remoteUsers : DEFAULT_USERS,
+            pieces: remoteState.pieces || [],
+            history: remoteState.history || [],
+            manualOrders: remoteState.manualOrders || [],
+            orderedAutoIds: remoteState.orderedAutoIds || [],
+            orderArchives: remoteState.orderArchives || [],
+            devis: remoteState.devis || [],
+            clients: remoteState.clients || [],
+            savedAt: new Date().toISOString(),
+          })
+        );
+      } catch (error) {
+        console.error("Chargement Supabase impossible, fallback localStorage", error);
+
+        const saved = localStorage.getItem("king_app_full");
+        if (saved) {
+          try {
+            const data = JSON.parse(saved);
+            setUsers(data.users?.length ? data.users : DEFAULT_USERS);
+            setPieces(data.pieces || []);
+            setHistory(data.history || []);
+            setManualOrders(data.manualOrders || []);
+            setOrderedAutoIds(data.orderedAutoIds || []);
+            setOrderArchives(data.orderArchives || []);
+            setDevis(data.devis || []);
+            setClients(data.clients || []);
+          } catch {
+            localStorage.removeItem("king_app_full");
+          }
+        }
+      } finally {
+        setAppLoaded(true);
       }
     }
+
+    startApp();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(
-      "king_app_full",
-      JSON.stringify({
-        users,
-        pieces,
-        history,
-        manualOrders,
-        orderedAutoIds,
-        orderArchives,
-        devis,
-        clients,
-        savedAt: new Date().toISOString(),
-      })
-    );
-  }, [users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, clients]);
+    if (!appLoaded) return;
+
+    const payload = {
+      users,
+      pieces,
+      history,
+      manualOrders,
+      orderedAutoIds,
+      orderArchives,
+      devis,
+      clients,
+      savedAt: new Date().toISOString(),
+    };
+
+    localStorage.setItem("king_app_full", JSON.stringify(payload));
+    saveAppState(payload).catch((error) => {
+      console.error("Sauvegarde Supabase impossible", error);
+    });
+  }, [appLoaded, users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, clients]);
 
   useEffect(() => {
     if (selectedClient) {
@@ -229,21 +281,73 @@ export default function App() {
     ]);
   }
 
-  function handleLogin(e) {
+  async function handleLogin(e) {
     e.preventDefault();
+
+    const cleanedLogin = String(login).trim().toLowerCase();
+    const cleanedPassword = String(password).trim();
+
+    try {
+      const { data: remoteUser, error } = await supabase
+        .from("users_app")
+        .select("*")
+        .ilike("login", cleanedLogin)
+        .eq("password", cleanedPassword)
+        .maybeSingle();
+
+      if (!error && remoteUser) {
+        setCurrentUser(remoteUser);
+        setConnected(true);
+        setModuleActif("Stock");
+
+        const { data: remoteUsers } = await supabase
+          .from("users_app")
+          .select("*")
+          .order("id", { ascending: true });
+
+        if (remoteUsers?.length) setUsers(remoteUsers);
+        return;
+      }
+    } catch (error) {
+      console.error("Connexion Supabase impossible, fallback local", error);
+    }
+
     const user = users.find(
       (u) =>
-        String(u.login).trim().toLowerCase() === String(login).trim().toLowerCase() &&
-        String(u.password).trim() === String(password).trim()
+        String(u.login).trim().toLowerCase() === cleanedLogin &&
+        String(u.password).trim() === cleanedPassword
     );
+
     if (!user) return alert("Identifiant ou mot de passe incorrect.");
+
     setCurrentUser(user);
     setConnected(true);
     setModuleActif("Stock");
   }
 
-  function resetLogin() {
-    setUsers(DEFAULT_USERS);
+  async function resetLogin() {
+    try {
+      await supabase.from("users_app").upsert(
+        {
+          login: "admin",
+          password: "admin123",
+          name: "Administrateur",
+          role: "Admin",
+        },
+        { onConflict: "login" }
+      );
+
+      const { data: remoteUsers } = await supabase
+        .from("users_app")
+        .select("*")
+        .order("id", { ascending: true });
+
+      if (remoteUsers?.length) setUsers(remoteUsers);
+    } catch (error) {
+      console.error("Réinitialisation Supabase impossible", error);
+      setUsers(DEFAULT_USERS);
+    }
+
     setLogin("admin");
     setPassword("admin123");
     alert("Compte admin réinitialisé : admin / admin123");
@@ -1461,26 +1565,74 @@ export default function App() {
     setUserForm({ ...userForm, [e.target.name]: e.target.value });
   }
 
-  function addOrUpdateUser(e) {
+  async function addOrUpdateUser(e) {
     e.preventDefault();
+
     if (!isAdmin) return alert("Seul l'administrateur peut gérer les comptes.");
-    if (!userForm.name || !userForm.login || !userForm.password) return alert("Complète le nom, l'identifiant et le mot de passe.");
-    const exists = users.some((u) => u.login.trim().toLowerCase() === userForm.login.trim().toLowerCase() && u.id !== editingUserId);
-    if (exists) return alert("Cet identifiant existe déjà.");
-    if (editingUserId) {
-      const oldUser = users.find((u) => u.id === editingUserId);
-      if (oldUser?.login === "admin" && userForm.login !== "admin") return alert("L'identifiant du compte admin principal doit rester admin.");
-      const updatedUsers = users.map((u) => (u.id === editingUserId ? { ...u, ...userForm } : u));
-      setUsers(updatedUsers);
-      if (currentUser?.id === editingUserId) setCurrentUser(updatedUsers.find((u) => u.id === editingUserId));
-      addHistory("Modification compte", `${userForm.name} (${userForm.login}) — ${userForm.role}`);
-      cancelEditUser();
-      return;
+    if (!userForm.name || !userForm.login || !userForm.password) {
+      return alert("Complète le nom, l'identifiant et le mot de passe.");
     }
-    const newUser = { id: Date.now(), ...userForm };
-    setUsers([...users, newUser]);
-    addHistory("Création compte", `${newUser.name} (${newUser.login}) — ${newUser.role}`);
-    setUserForm({ name: "", login: "", password: "", role: "Salarié" });
+
+    const normalizedLogin = userForm.login.trim().toLowerCase();
+
+    const exists = users.some(
+      (u) => String(u.login).trim().toLowerCase() === normalizedLogin && u.id !== editingUserId
+    );
+
+    if (exists) return alert("Cet identifiant existe déjà.");
+
+    try {
+      if (editingUserId) {
+        const oldUser = users.find((u) => u.id === editingUserId);
+
+        if (oldUser?.login === "admin" && normalizedLogin !== "admin") {
+          return alert("L'identifiant du compte admin principal doit rester admin.");
+        }
+
+        const { data: updatedUser, error } = await supabase
+          .from("users_app")
+          .update({
+            name: userForm.name,
+            login: normalizedLogin,
+            password: userForm.password,
+            role: userForm.role,
+          })
+          .eq("id", editingUserId)
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        const updatedUsers = users.map((u) => (u.id === editingUserId ? updatedUser : u));
+        setUsers(updatedUsers);
+
+        if (currentUser?.id === editingUserId) setCurrentUser(updatedUser);
+
+        addHistory("Modification compte", `${updatedUser.name} (${updatedUser.login}) — ${updatedUser.role}`);
+        cancelEditUser();
+        return;
+      }
+
+      const { data: newUser, error } = await supabase
+        .from("users_app")
+        .insert({
+          name: userForm.name,
+          login: normalizedLogin,
+          password: userForm.password,
+          role: userForm.role,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setUsers([...users, newUser]);
+      addHistory("Création compte", `${newUser.name} (${newUser.login}) — ${newUser.role}`);
+      setUserForm({ name: "", login: "", password: "", role: "Salarié" });
+    } catch (error) {
+      console.error("Erreur gestion compte Supabase", error);
+      alert("Erreur Supabase : le compte n'a pas été enregistré. Vérifie la table users_app.");
+    }
   }
 
   function startEditUser(user) {
@@ -1495,14 +1647,25 @@ export default function App() {
     setUserForm({ name: "", login: "", password: "", role: "Salarié" });
   }
 
-  function deleteUser(id) {
+  async function deleteUser(id) {
     if (!isAdmin) return alert("Seul l'administrateur peut supprimer des comptes.");
+
     const target = users.find((u) => u.id === id);
     if (target?.login === "admin") return alert("Le compte admin principal ne peut pas être supprimé.");
     if (!window.confirm(`Supprimer le compte de ${target?.name} ?`)) return;
-    setUsers(users.filter((u) => u.id !== id));
-    if (editingUserId === id) cancelEditUser();
-    if (target) addHistory("Suppression compte", `${target.name} (${target.login})`);
+
+    try {
+      const { error } = await supabase.from("users_app").delete().eq("id", id);
+      if (error) throw error;
+
+      setUsers(users.filter((u) => u.id !== id));
+
+      if (editingUserId === id) cancelEditUser();
+      if (target) addHistory("Suppression compte", `${target.name} (${target.login})`);
+    } catch (error) {
+      console.error("Erreur suppression compte Supabase", error);
+      alert("Erreur Supabase : le compte n'a pas été supprimé.");
+    }
   }
 
   function exportBackup() {
@@ -1535,6 +1698,19 @@ export default function App() {
       }
     };
     reader.readAsText(file);
+  }
+
+  if (!appLoaded) {
+    return (
+      <div className="loginPage" style={{ backgroundImage: `url(${loginBg})` }}>
+        <div className="loginOverlay"></div>
+        <div className="loginCard">
+          <div className="loginLogoCircle"><img src={logo} alt={ENTREPRISE.nom} /></div>
+          <h1>{ENTREPRISE.nom}</h1>
+          <p>Chargement des données multi-PC...</p>
+        </div>
+      </div>
+    );
   }
 
   if (!connected) {
