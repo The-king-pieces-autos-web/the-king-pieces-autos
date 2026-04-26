@@ -69,6 +69,7 @@ export default function App() {
 
   const [editingUserId, setEditingUserId] = useState(null);
   const [editingOrderId, setEditingOrderId] = useState(null);
+  const [editingPieceId, setEditingPieceId] = useState(null);
   const [editingOrderArchiveId, setEditingOrderArchiveId] = useState(null);
   const [editingDevisId, setEditingDevisId] = useState(null);
   const [editingDevisLineId, setEditingDevisLineId] = useState(null);
@@ -411,9 +412,27 @@ export default function App() {
 
   function ajouter(e) {
     e.preventDefault();
+
     if (!form.designation || !form.famille || !form.sousFamille) {
       return alert("Complète au minimum le nom de la pièce, la famille et la sous-famille.");
     }
+
+    if (editingPieceId) {
+      const updatedPiece = {
+        id: editingPieceId,
+        ...form,
+        quantite: Number(form.quantite || 0),
+        rupture: Number(form.rupture || 2),
+        updatedBy: currentUser?.login,
+        updatedAt: new Date().toLocaleString("fr-FR"),
+      };
+
+      setPieces(pieces.map((piece) => (piece.id === editingPieceId ? updatedPiece : piece)));
+      addHistory("Modification pièce stock", `${form.designation} — ${form.famille} / ${form.sousFamille}`);
+      cancelEditPiece();
+      return;
+    }
+
     const newPiece = {
       id: Date.now(),
       ...form,
@@ -422,8 +441,46 @@ export default function App() {
       createdBy: currentUser?.login,
       createdAt: new Date().toLocaleString("fr-FR"),
     };
+
     setPieces([newPiece, ...pieces]);
     addHistory("Ajout pièce", `${form.designation} — ${form.famille} / ${form.sousFamille}`);
+
+    setForm({
+      designation: "",
+      famille: "",
+      sousFamille: "",
+      refOrigine: "",
+      refInterne: "",
+      fournisseur: "",
+      quantite: "",
+      rupture: "2",
+      prixPart: "",
+      prixPro: "",
+      image: "",
+    });
+  }
+
+  function startEditPiece(piece) {
+    setEditingPieceId(piece.id);
+    setForm({
+      designation: piece.designation || "",
+      famille: piece.famille || "",
+      sousFamille: piece.sousFamille || "",
+      refOrigine: piece.refOrigine || "",
+      refInterne: piece.refInterne || "",
+      fournisseur: piece.fournisseur || "",
+      quantite: String(piece.quantite ?? ""),
+      rupture: String(piece.rupture ?? "2"),
+      prixPart: String(piece.prixPart ?? ""),
+      prixPro: String(piece.prixPro ?? ""),
+      image: piece.image || "",
+    });
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEditPiece() {
+    setEditingPieceId(null);
     setForm({
       designation: "",
       famille: "",
@@ -1836,6 +1893,33 @@ export default function App() {
               <div><span>À commander</span><strong>{ruptures.length}</strong></div>
               <div><span>Résultats</span><strong>{results.length}</strong></div>
             </section>
+            {devisStockSelection.length > 0 && (
+              <section className="panel" style={{ marginBottom: "22px" }}>
+                <div className="panelTitle">
+                  <span>CL</span>
+                  <div>
+                    <h3>Sélection client en cours</h3>
+                    <p>Les pièces que tu cherches pour ton client restent ici avant de les envoyer ensemble vers le devis.</p>
+                  </div>
+                </div>
+
+                <div className="historyList">
+                  {devisStockSelection.map((item) => (
+                    <div className="historyItem" key={`${item.id}-${item.priceType}`}>
+                      <strong>{item.designation}</strong>
+                      <p>Référence interne : {item.reference || "-"}</p>
+                      <span>Tarif : {item.priceType === "pro" ? "Professionnel" : "Particulier"} — Prix TTC : {Number(item.prixTTC || 0).toFixed(2)} €</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="actions" style={{ marginTop: "16px" }}>
+                  <button onClick={addSelectedPiecesToDevis}>Envoyer la sélection client au devis</button>
+                  <button className="delete" onClick={clearDevisStockSelection}>Vider sélection client</button>
+                </div>
+              </section>
+            )}
+
 
             {devisStockSelection.length > 0 && (
               <section className="panel" style={{ marginBottom: "22px" }}>
@@ -1866,7 +1950,7 @@ export default function App() {
 
             <section className="contentGrid">
               <div className="panel formPanel">
-                <div className="panelTitle"><span>01</span><div><h3>Ajouter une pièce</h3><p>Choisis une famille puis une sous-famille.</p></div></div>
+                <div className="panelTitle"><span>01</span><div><h3>{editingPieceId ? "Modifier une pièce" : "Ajouter une pièce"}</h3><p>Choisis une famille puis une sous-famille.</p></div></div>
                 <form className="form" onSubmit={ajouter}>
                   <input name="designation" value={form.designation} onChange={change} placeholder="Nom de la pièce" />
                   <select name="famille" value={form.famille} onChange={change}>
@@ -1886,7 +1970,8 @@ export default function App() {
                   <input name="prixPro" value={form.prixPro} onChange={change} placeholder="Prix professionnel TTC" />
                   <label className="imageInput">Ajouter image pièce<input type="file" accept="image/*" onChange={handleImage} hidden /></label>
                   {form.image && <img className="imagePreview" src={form.image} alt="Aperçu pièce" />}
-                  <button>Ajouter au stock</button>
+                  <button>{editingPieceId ? "Enregistrer modification" : "Ajouter au stock"}</button>
+                  {editingPieceId && <button type="button" className="delete" onClick={cancelEditPiece}>Annuler modification</button>}
                 </form>
               </div>
 
@@ -1921,13 +2006,14 @@ export default function App() {
                       </div>
                       <div className="stockStatus"><strong>Stock : {piece.quantite}</strong><span className={low ? "danger" : "success"}>{low ? "Envoyé à commander" : "Disponible"}</span></div>
                       <div className="actions" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => vendre(piece.id)}>Vendu</button>
-                        <button onClick={() => addStockPieceToDevis(piece, "particulier")}>Ajouter direct devis</button>
+                        <button onClick={() => vendre(piece.id)}>Vendu - retirer 1 du stock</button>
                         <button onClick={() => togglePieceForDevis(piece, "particulier")}>
-                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "particulier") ? "Retirer sélection" : "Sélection devis"}
+                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "particulier") ? "Retirer prix particulier" : "Prix particulier"}
                         </button>
-                        <button onClick={() => togglePieceForDevis(piece, "pro")}>Sélection devis pro</button>
-                        <button>Modifier</button>
+                        <button onClick={() => togglePieceForDevis(piece, "pro")}>
+                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "pro") ? "Retirer prix pro" : "Prix professionnel"}
+                        </button>
+                        <button onClick={() => startEditPiece(piece)}>Modifier</button>
                         <button className="delete" onClick={() => supprimer(piece.id)}>Supprimer</button>
                       </div>
                     </article>
