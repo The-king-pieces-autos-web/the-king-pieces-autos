@@ -89,15 +89,6 @@ function findFamilyConfig(value) {
   });
 }
 
-function normalizeFamilleName(value) {
-  if (!value) return "";
-  return findFamilyConfig(value)?.label || value;
-}
-
-function getSousFamillesByFamille(value) {
-  return findFamilyConfig(value)?.sousFamilles || [];
-}
-
 const FAMILLE_LABELS = Object.keys(CATALOGUE);
 
 function cleanFamilyText(value) {
@@ -116,7 +107,7 @@ function normalizeFamilleName(value) {
     cleaned === "distribution / kit chaine" ||
     cleaned === "distribution/kit chaine" ||
     cleaned === "distribution kit chaine" ||
-    cleaned.includes("distribution") && cleaned.includes("kit") && cleaned.includes("chaine")
+    (cleaned.includes("distribution") && cleaned.includes("kit") && cleaned.includes("chaine"))
   ) {
     return "Distribution / Kit chaîne";
   }
@@ -128,7 +119,7 @@ function normalizeFamilleName(value) {
     cleaned === "injection / carburant" ||
     cleaned === "injection/carburant" ||
     cleaned === "injection carburant" ||
-    cleaned.includes("injection") && (cleaned.includes("carburant") || cleaned.includes("carburation"))
+    (cleaned.includes("injection") && (cleaned.includes("carburant") || cleaned.includes("carburation")))
   ) {
     return "Injection / Carburant";
   }
