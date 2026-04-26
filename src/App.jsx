@@ -34,6 +34,28 @@ const CATALOGUE = {
   "Capteurs / Électronique": ["Capteur PMH", "Capteur AAC", "Débitmètre", "Sonde lambda", "Capteur température", "Capteur pression huile", "Capteur pression turbo", "Capteur MAP", "Capteur ABS", "Relais", "Fusibles", "Comodos"],
 };
 
+const FAMILLE_ALIASES = {
+  "Distribution / Kit chaine": "Distribution / Kit chaîne",
+  "Distribution / Kit Chaîne": "Distribution / Kit chaîne",
+  "Distribution / Kit chaîne": "Distribution / Kit chaîne",
+  "Distribution / Kit Chaine": "Distribution / Kit chaîne",
+
+  "Injection / Carburation": "Injection / Carburant",
+  "Injection / carburant": "Injection / Carburant",
+  "Injection / Carburant": "Injection / Carburant",
+  "Injection / Carburant / Carburation": "Injection / Carburant",
+};
+
+function normalizeFamilleName(value) {
+  if (!value) return "";
+  return FAMILLE_ALIASES[value] || value;
+}
+
+function getSousFamillesByFamille(value) {
+  const normalized = normalizeFamilleName(value);
+  return CATALOGUE[normalized] || [];
+}
+
 const MODULES = ["Stock", "Stock à commander", "Devis", "Clients", "Utilisateurs", "Historique"];
 
 export default function App() {
@@ -139,8 +161,8 @@ export default function App() {
   });
 
   const familles = Object.keys(CATALOGUE);
-  const sousFamillesDisponibles = form.famille ? CATALOGUE[form.famille] || [] : [];
-  const sousFamillesAffichees = familleActive ? CATALOGUE[familleActive] || [] : [];
+  const sousFamillesDisponibles = form.famille ? getSousFamillesByFamille(form.famille) : [];
+  const sousFamillesAffichees = familleActive ? getSousFamillesByFamille(familleActive) : [];
   const isAdmin = currentUser?.role === "Admin";
   const visibleModules = isAdmin
     ? MODULES
@@ -153,17 +175,19 @@ export default function App() {
   }, [isAdmin, moduleActif]);
 
   function normalizePiece(piece) {
-    const familleExiste = piece?.famille && CATALOGUE[piece.famille];
+    const normalizedFamille = normalizeFamilleName(piece?.famille || "");
+    const sousFamilles = getSousFamillesByFamille(normalizedFamille);
+    const familleExiste = Boolean(normalizedFamille && sousFamilles.length > 0);
     const sousFamilleExiste =
-      familleExiste && piece?.sousFamille && CATALOGUE[piece.famille].includes(piece.sousFamille);
+      familleExiste && piece?.sousFamille && sousFamilles.includes(piece.sousFamille);
 
     return {
       ...piece,
-      famille: piece?.famille || "",
+      famille: normalizedFamille,
       sousFamille: sousFamilleExiste
         ? piece.sousFamille
         : familleExiste
-          ? CATALOGUE[piece.famille][0]
+          ? sousFamilles[0]
           : piece?.sousFamille || "",
       rupture: Number(piece?.rupture ?? 2),
       quantite: Number(piece?.quantite ?? 0),
@@ -293,7 +317,7 @@ export default function App() {
   const results = useMemo(() => {
     return pieces.filter((p) => {
       const txt = `${p.designation} ${p.refOrigine} ${p.refInterne} ${p.famille} ${p.sousFamille}`.toLowerCase();
-      return txt.includes(search.toLowerCase()) && (!familleActive || p.famille === familleActive);
+      return txt.includes(search.toLowerCase()) && (!familleActive || normalizeFamilleName(p.famille) === normalizeFamilleName(familleActive));
     });
   }, [pieces, search, familleActive]);
 
@@ -423,11 +447,12 @@ export default function App() {
     const { name, value } = e.target;
 
     if (name === "famille") {
-      const sousFamilles = CATALOGUE[value] || [];
+      const normalizedFamille = normalizeFamilleName(value);
+      const sousFamilles = getSousFamillesByFamille(normalizedFamille);
 
       return setForm({
         ...form,
-        famille: value,
+        famille: normalizedFamille,
         sousFamille: sousFamilles.length > 0 ? sousFamilles[0] : "",
       });
     }
@@ -2199,7 +2224,7 @@ export default function App() {
                       onClick={() => setFamilleActive(famille)}
                     >
                       <strong>{famille}</strong>
-                      <small>{CATALOGUE[famille]?.length || 0} sous-famille(s)</small>
+                      <small>{getSousFamillesByFamille(famille)?.length || 0} sous-famille(s)</small>
                     </button>
                   ))}
                 </div>
@@ -2236,7 +2261,7 @@ export default function App() {
                           onClick={() => {
                             setForm({
                               ...form,
-                              famille: familleActive,
+                              famille: normalizeFamilleName(familleActive),
                               sousFamille: sf,
                             });
                           }}
