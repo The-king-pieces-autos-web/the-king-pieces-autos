@@ -826,10 +826,87 @@ export default function App() {
     if (piece) addHistory("Suppression pièce", piece.designation);
   }
 
-  function addStockPieceToDevis(piece, priceType) {
-    if (!devisForm.numero) setDevisForm((prev) => ({ ...prev, numero: nextDevisNumero() }));
+  function normalizeTextForMatch(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function findMatchingEmptyDevisLine(piece) {
+    const pieceName = normalizeTextForMatch(piece.designation);
+    const pieceSousFamille = normalizeTextForMatch(piece.sousFamille);
+    const pieceFamille = normalizeTextForMatch(piece.famille);
+
+    return devisLines.find((line) => {
+      if (!line.sourceRequestId) return false;
+      if (line.reference || Number(line.prixTTC || 0) > 0) return false;
+
+      const lineName = normalizeTextForMatch(line.designation);
+
+      if (!lineName) return false;
+
+      return (
+        pieceName.includes(lineName) ||
+        lineName.includes(pieceName) ||
+        (pieceSousFamille && (pieceSousFamille.includes(lineName) || lineName.includes(pieceSousFamille))) ||
+        (pieceFamille && (pieceFamille.includes(lineName) || lineName.includes(pieceFamille)))
+      );
+    });
+  }
+
+  function fillExistingDevisRequestLine(piece, priceType) {
+    const matchingLine = findMatchingEmptyDevisLine(piece);
+
+    if (!matchingLine) return false;
+
     const prixChoisi =
-      priceType === "pro" ? Number(piece.prixPro || piece.prixPart || 0) : Number(piece.prixPart || piece.prixPro || 0);
+      priceType === "pro"
+        ? Number(piece.prixPro || piece.prixPart || 0)
+        : Number(piece.prixPart || piece.prixPro || 0);
+
+    setDevisLines((prev) =>
+      prev.map((line) =>
+        line.id === matchingLine.id
+          ? {
+              ...line,
+              designation: line.designation || piece.designation,
+              reference: piece.refInterne || piece.refOrigine || "",
+              quantite: Number(line.quantite || 1),
+              prixTTC: prixChoisi,
+              priceType,
+              sourceStockId: piece.id,
+              stockDesignation: piece.designation,
+            }
+          : line
+      )
+    );
+
+    addHistory(
+      "Ligne devis complétée depuis stock",
+      `${matchingLine.designation} → ${piece.designation} — tarif ${priceType === "pro" ? "professionnel" : "particulier"}`
+    );
+
+    setModuleActif("Devis");
+    return true;
+  }
+
+  function addStockPieceToDevis(piece, priceType) {
+    if (fillExistingDevisRequestLine(piece, priceType)) {
+      return;
+    }
+
+    if (!devisForm.numero) {
+      setDevisForm((prev) => ({ ...prev, numero: nextDevisNumero() }));
+    }
+
+    const prixChoisi =
+      priceType === "pro"
+        ? Number(piece.prixPro || piece.prixPart || 0)
+        : Number(piece.prixPart || piece.prixPro || 0);
+
     setDevisLines((prev) => [
       ...prev,
       {
@@ -842,11 +919,19 @@ export default function App() {
         sourceStockId: piece.id,
       },
     ]);
+
     setModuleActif("Devis");
-    addHistory("Ajout pièce au devis", `${piece.designation} — tarif ${priceType === "pro" ? "professionnel" : "particulier"}`);
+    addHistory(
+      "Ajout pièce au devis",
+      `${piece.designation} — tarif ${priceType === "pro" ? "professionnel" : "particulier"}`
+    );
   }
 
   function togglePieceForDevis(piece, priceType = "particulier") {
+    if (fillExistingDevisRequestLine(piece, priceType)) {
+      return;
+    }
+
     setDevisStockSelection((prev) => {
       const exists = prev.find((item) => item.id === piece.id && item.priceType === priceType);
 
@@ -930,17 +1015,67 @@ export default function App() {
       setDevisForm((prev) => ({ ...prev, numero: nextDevisNumero() }));
     }
 
-    const groupedLines = confirmedItems.map((piece) => ({
-      id: Date.now() + Math.random(),
-      designation: piece.designation,
-      reference: piece.reference,
-      quantite: Number(piece.quantite || 1),
-      prixTTC: Number(piece.prixTTC || 0),
-      priceType: piece.priceType,
-      sourceStockId: piece.sourceStockId,
-    }));
+    let remainingItems = [...confirmedItems];
 
-    setDevisLines((prev) => [...prev, ...groupedLines]);
+    setDevisLines((prevLines) => {
+      let updatedLines = [...prevLines];
+
+      remainingItems = remainingItems.filter((piece) => {
+        const fakeStockPiece = {
+          id: piece.sourceStockId,
+          designation: piece.designation,
+          refInterne: piece.reference,
+          refOrigine: piece.reference,
+          famille: "",
+          sousFamille: "",
+          prixPart: piece.priceType === "particulier" ? piece.prixTTC : "",
+          prixPro: piece.priceType === "pro" ? piece.prixTTC : "",
+        };
+
+        const pieceName = normalizeTextForMatch(fakeStockPiece.designation);
+
+        const matchingLine = updatedLines.find((line) => {
+          if (!line.sourceRequestId) return false;
+          if (line.reference || Number(line.prixTTC || 0) > 0) return false;
+
+          const lineName = normalizeTextForMatch(line.designation);
+          if (!lineName) return false;
+
+          return pieceName.includes(lineName) || lineName.includes(pieceName);
+        });
+
+        if (!matchingLine) return true;
+
+        updatedLines = updatedLines.map((line) =>
+          line.id === matchingLine.id
+            ? {
+                ...line,
+                reference: piece.reference || "",
+                quantite: Number(piece.quantite || line.quantite || 1),
+                prixTTC: Number(piece.prixTTC || 0),
+                priceType: piece.priceType,
+                sourceStockId: piece.sourceStockId,
+                stockDesignation: piece.designation,
+              }
+            : line
+        );
+
+        return false;
+      });
+
+      const newLines = remainingItems.map((piece) => ({
+        id: Date.now() + Math.random(),
+        designation: piece.designation,
+        reference: piece.reference,
+        quantite: Number(piece.quantite || 1),
+        prixTTC: Number(piece.prixTTC || 0),
+        priceType: piece.priceType,
+        sourceStockId: piece.sourceStockId,
+      }));
+
+      return [...updatedLines, ...newLines];
+    });
+
     addHistory("Transfert sélection client au devis", `${confirmedItems.length} pièce(s) confirmée(s) transférée(s)`);
 
     setDevisStockSelection((prev) => prev.filter((item) => !item.confirmed));
@@ -2862,10 +2997,10 @@ export default function App() {
                       <div className="actions" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => vendre(piece.id)}>Vendu - retirer 1 du stock</button>
                         <button onClick={() => togglePieceForDevis(piece, "particulier")}>
-                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "particulier") ? "Retirer de la liste" : "Ajouter à la liste - prix particulier"}
+                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "particulier") ? "Retirer de la liste" : "Compléter devis / prix particulier"}
                         </button>
                         <button onClick={() => togglePieceForDevis(piece, "pro")}>
-                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "pro") ? "Retirer prix pro" : "Ajouter à la liste - prix professionnel"}
+                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "pro") ? "Retirer prix pro" : "Compléter devis / prix professionnel"}
                         </button>
                         <button onClick={() => startEditPiece(piece)}>Modifier</button>
                         <button className="delete" onClick={() => supprimer(piece.id)}>Supprimer</button>
