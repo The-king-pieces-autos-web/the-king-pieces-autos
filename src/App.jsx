@@ -133,7 +133,7 @@ function getSousFamillesByFamille(value) {
   return CATALOGUE[normalized] || [];
 }
 
-const MODULES = ["Stock", "Stock à commander", "Devis", "Clients", "Utilisateurs", "Historique"];
+const MODULES = ["Stock", "Stock à commander", "Cahier", "Devis", "Clients", "Utilisateurs", "Historique"];
 
 export default function App() {
   const [connected, setConnected] = useState(() => {
@@ -222,7 +222,6 @@ export default function App() {
     modele: "",
     piecesDemandees: "",
     notesInternes: "",
-    prixAnnonce: "",
   });
 
   const [requestPieceInput, setRequestPieceInput] = useState("");
@@ -973,8 +972,7 @@ export default function App() {
       modele: "",
       piecesDemandees: "",
       notesInternes: "",
-      prixAnnonce: "",
-    });
+      });
   }
 
   function saveDevisRequest(e) {
@@ -1025,7 +1023,6 @@ export default function App() {
       modele: request.modele || "",
       piecesDemandees: request.piecesDemandees || "",
       notesInternes: request.notesInternes || "",
-      prixAnnonce: request.prixAnnonce || "",
     });
     setSelectedDevisRequest(null);
     setModuleActif("Devis");
@@ -1181,7 +1178,6 @@ export default function App() {
               <p><strong>Salarié :</strong> ${request.createdByName || "-"}</p>
               <p><strong>Pièces demandées :</strong></p>
               <p>${pieces}</p>
-              <p><strong>Prix annoncé :</strong> ${request.prixAnnonce || "-"} €</p>
             </div>
 
             <div class="box">
@@ -1365,7 +1361,6 @@ export default function App() {
             ? {
                 ...request,
                 statut: "Client rappelé",
-                prixAnnonce: Number(devisTotals.totalTTC || 0).toFixed(2),
                 updatedAt: new Date().toLocaleString("fr-FR"),
                 updatedBy: currentUser?.name || "-",
               }
@@ -2855,13 +2850,13 @@ export default function App() {
           </>
         )}
 
-        {moduleActif === "Devis" && (
+        {moduleActif === "Cahier" && (
           <>
             <section className="stats">
-              <div><span>Demandes</span><strong>{devisRequests.length}</strong></div>
-              <div><span>Devis</span><strong>{devis.length}</strong></div>
-              <div><span>Devis en cours</span><strong>{devisLines.length}</strong></div>
-              <div><span>Total TTC</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div>
+              <div><span>Demandes cahier</span><strong>{devisRequests.length}</strong></div>
+              <div><span>À traiter</span><strong>{devisRequests.filter((d) => d.statut === "À traiter").length}</strong></div>
+              <div><span>En recherche</span><strong>{devisRequests.filter((d) => d.statut === "En recherche").length}</strong></div>
+              <div><span>Devis prêts</span><strong>{devisRequests.filter((d) => d.statut === "Devis prêt").length}</strong></div>
             </section>
 
             <section className="panel stockPanel">
@@ -2869,7 +2864,7 @@ export default function App() {
                 <span>01</span>
                 <div>
                   <h3>{editingDevisRequestId ? "Modifier une demande" : "Nouvelle demande client"}</h3>
-                  <p>Crée la demande et ajoute les pièces une par une. La demande reste À traiter jusqu’au devis final.</p>
+                  <p>Sur place, téléphone ou WhatsApp. Tu tapes la plaque ou le VIN : l’historique de cette voiture s’affiche directement.</p>
                 </div>
               </div>
 
@@ -2904,7 +2899,6 @@ export default function App() {
                 <input name="vin" value={devisRequestForm.vin} onChange={changeDevisRequestForm} placeholder="VIN / numéro de châssis" />
                 <input name="marque" value={devisRequestForm.marque} onChange={changeDevisRequestForm} placeholder="Marque" />
                 <input name="modele" value={devisRequestForm.modele} onChange={changeDevisRequestForm} placeholder="Modèle" />
-                <input name="prixAnnonce" value={devisRequestForm.prixAnnonce} onChange={changeDevisRequestForm} placeholder="Prix annoncé si déjà donné" />
 
                 <div style={{ gridColumn: "1 / -1" }}>
                   <div className="form" style={{ gridTemplateColumns: "1fr auto", marginBottom: "12px" }}>
@@ -2932,9 +2926,7 @@ export default function App() {
                         <div className="historyItem" key={`${piece}-${index}`}>
                           <strong>{index + 1}. {piece}</strong>
                           <div className="actions" style={{ marginTop: "8px" }}>
-                            <button type="button" className="delete" onClick={() => removeRequestedPiece(index)}>
-                              Retirer
-                            </button>
+                            <button type="button" className="delete" onClick={() => removeRequestedPiece(index)}>Retirer</button>
                           </div>
                         </div>
                       ))}
@@ -2946,38 +2938,36 @@ export default function App() {
                   name="notesInternes"
                   value={devisRequestForm.notesInternes}
                   onChange={changeDevisRequestForm}
-                  placeholder="Notes internes : fournisseur, rappel, attention prix déjà donné..."
-                  style={{ minHeight: "80px", gridColumn: "1 / -1", border: "1px solid #bfd4ff", borderRadius: "15px", padding: "12px", fontFamily: "inherit" }}
+                  placeholder="Demande complète du client + notes internes : modèle, rappel, fournisseur, remarque prix..."
+                  style={{ minHeight: "95px", gridColumn: "1 / -1", border: "1px solid #bfd4ff", borderRadius: "15px", padding: "12px", fontFamily: "inherit" }}
                 />
 
-                <button>{editingDevisRequestId ? "Enregistrer modification" : "Enregistrer demande"}</button>
+                <button>{editingDevisRequestId ? "Enregistrer modification" : "Enregistrer demande non traitée"}</button>
 
                 {editingDevisRequestId && (
-                  <button type="button" className="delete" onClick={resetDevisRequestForm}>
-                    Annuler modification
-                  </button>
+                  <button type="button" className="delete" onClick={resetDevisRequestForm}>Annuler modification</button>
                 )}
               </form>
             </section>
 
-            {matchingDevisHistory.length > 0 && (
+            {vehicleHistoryForRequest.length > 0 && (
               <section className="panel stockPanel">
                 <div className="panelTitle">
                   <span>02</span>
                   <div>
-                    <h3>Historique trouvé</h3>
-                    <p>Vérifie les anciens prix avant de répondre au client.</p>
+                    <h3>Historique de cette voiture</h3>
+                    <p>Résultat automatique dès que tu tapes une plaque ou un VIN.</p>
                   </div>
                 </div>
 
                 <div className="historyList">
-                  {matchingDevisHistory.map((item) => (
+                  {vehicleHistoryForRequest.map((item) => (
                     <div className="historyItem" key={`${item.sourceType}-${item.id}`}>
                       <strong>{item.sourceType} — {item.client || "-"}</strong>
                       <p>Plaque : {item.plaque || "-"} — VIN : {item.vin || "-"}</p>
                       <p>{item.marque || "-"} {item.modele || ""}</p>
                       <span>
-                        Prix : {item.prixAnnonce || item.totalTTC || "-"} €
+                        Total/prix : {item.totalTTC ? `${Number(item.totalTTC).toFixed(2)} €` : "-"}
                         — Salarié : {item.createdByName || item.createdBy || "-"}
                         — Statut : {item.statut || item.status || "-"}
                       </span>
@@ -3007,8 +2997,8 @@ export default function App() {
               <div className="panelTitle">
                 <span>03</span>
                 <div>
-                  <h3>Liste des demandes</h3>
-                  <p>Recherche par nom, téléphone, plaque, VIN, salarié ou pièce.</p>
+                  <h3>Liste des demandes du cahier</h3>
+                  <p>Tout le monde peut rechercher par plaque, VIN, nom, téléphone ou pièce. L’admin voit tout.</p>
                 </div>
               </div>
 
@@ -3079,13 +3069,25 @@ export default function App() {
                 })}
               </div>
             </section>
+          </>
+        )}
+
+
+        {moduleActif === "Devis" && (
+          <>
+            <section className="stats">
+              <div><span>Devis enregistrés</span><strong>{devis.length}</strong></div>
+              <div><span>Lignes en cours</span><strong>{devisLines.length}</strong></div>
+              <div><span>Total TTC</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div>
+              <div><span>Mode</span><strong>{editingDevisId ? "Modification" : "Création"}</strong></div>
+            </section>
 
             <section className="panel stockPanel">
               <div className="panelTitle">
-                <span>04</span>
+                <span>01</span>
                 <div>
                   <h3>{editingDevisId ? "Modifier le devis final" : "Devis final"}</h3>
-                  <p>Quand tu ouvres une demande, toutes les pièces s’affichent ici. Tu complètes seulement les références et les prix, puis tu enregistres.</p>
+                  <p>Ouvre une demande depuis le Cahier : toutes les pièces demandées arrivent ici, tu complètes référence et prix.</p>
                 </div>
               </div>
 
@@ -3126,6 +3128,8 @@ export default function App() {
                 </form>
               </div>
 
+              {devisLines.length === 0 && <div className="empty" style={{ marginTop: "18px" }}>Aucune pièce dans le devis.</div>}
+
               {devisLines.length > 0 && (
                 <div style={{ overflowX: "auto", marginTop: "18px" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: "18px", overflow: "hidden", border: "1px solid rgba(191, 212, 255, 0.85)" }}>
@@ -3146,27 +3150,13 @@ export default function App() {
                           <td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td>
                           <td style={{ padding: "12px" }}>{line.designation}</td>
                           <td style={{ padding: "12px" }}>
-                            <input
-                              value={line.reference || ""}
-                              onChange={(e) => updateDevisLine(line.id, "reference", e.target.value)}
-                              placeholder="Référence"
-                              style={{ width: "140px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }}
-                            />
+                            <input value={line.reference || ""} onChange={(e) => updateDevisLine(line.id, "reference", e.target.value)} placeholder="Référence" style={{ width: "140px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }} />
                           </td>
                           <td style={{ padding: "12px" }}>
-                            <input
-                              value={line.quantite}
-                              onChange={(e) => updateDevisLine(line.id, "quantite", e.target.value)}
-                              style={{ width: "70px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }}
-                            />
+                            <input value={line.quantite} onChange={(e) => updateDevisLine(line.id, "quantite", e.target.value)} style={{ width: "70px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }} />
                           </td>
                           <td style={{ padding: "12px" }}>
-                            <input
-                              value={line.prixTTC}
-                              onChange={(e) => updateDevisLine(line.id, "prixTTC", e.target.value)}
-                              placeholder="Prix"
-                              style={{ width: "90px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }}
-                            />
+                            <input value={line.prixTTC} onChange={(e) => updateDevisLine(line.id, "prixTTC", e.target.value)} placeholder="Prix" style={{ width: "90px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }} />
                           </td>
                           <td style={{ padding: "12px", fontWeight: "900" }}>{(Number(line.quantite) * Number(line.prixTTC)).toFixed(2)} €</td>
                           <td style={{ padding: "12px" }}>
@@ -3199,7 +3189,7 @@ export default function App() {
 
             <section className="panel stockPanel">
               <div className="panelTitle">
-                <span>05</span>
+                <span>02</span>
                 <div>
                   <h3>Devis enregistrés</h3>
                   <p>Modifier, supprimer ou imprimer à tout moment.</p>
