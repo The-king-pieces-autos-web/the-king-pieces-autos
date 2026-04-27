@@ -650,6 +650,279 @@ export default function App() {
     if (error) throw error;
   }
 
+  function dbClientToApp(row, piecesRows = [], paiementsRows = []) {
+    return {
+      id: row.id,
+      legacyId: row.legacy_id || "",
+      nom: row.nom || "",
+      telephone: row.telephone || "",
+      adresse: row.adresse || "",
+      pieces: (piecesRows || []).map((p) => ({
+        id: p.id,
+        legacyId: p.legacy_id || "",
+        designation: p.designation || "",
+        reference: p.reference || "",
+        quantite: Number(p.quantite || 1),
+        prix: Number(p.prix ?? p.montant ?? 0),
+        statut: p.statut || "En cours",
+        date: p.date_piece || p.created_at || "",
+        createdAt: p.created_at || "",
+        updatedAt: p.updated_at || "",
+      })),
+      archives: (paiementsRows || []).map((p) => ({
+        id: p.id,
+        legacyId: p.legacy_id || "",
+        type: "Paiement client",
+        montant: Number(p.montant || 0),
+        total: Number(p.montant || 0),
+        mode: p.mode_paiement || p.mode || "",
+        commentaire: p.commentaire || "",
+        pieces: Array.isArray(p.pieces_payees) ? p.pieces_payees : [],
+        date: p.date_paiement || p.created_at || "",
+        user: p.created_by || "",
+        createdAt: p.created_at || "",
+      })),
+      createdAt: row.created_at || "",
+      updatedAt: row.updated_at || "",
+      sourceDb: "clients",
+    };
+  }
+
+  function appClientToDb(client) {
+    return {
+      nom: client.nom || "",
+      telephone: client.telephone || "",
+      adresse: client.adresse || "",
+      updated_by: currentUser?.name || currentUser?.login || "system",
+    };
+  }
+
+  function appClientPieceToDb(piece, clientId) {
+    return {
+      client_id: clientId,
+      designation: piece.designation || "",
+      reference: piece.reference || "",
+      quantite: Number(piece.quantite || 1),
+      prix: Number(piece.prix || 0),
+      statut: piece.statut || "En cours",
+      updated_by: currentUser?.name || currentUser?.login || "system",
+    };
+  }
+
+  async function loadClientsFromDb() {
+    const { data: clientRows, error: clientError } = await supabase
+      .from("clients")
+      .select("*")
+      .order("updated_at", { ascending: false });
+
+    if (clientError) {
+      console.error("Chargement clients impossible", clientError);
+      return null;
+    }
+
+    const { data: pieceRows, error: pieceError } = await supabase
+      .from("client_pieces")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (pieceError) {
+      console.error("Chargement client_pieces impossible", pieceError);
+      return null;
+    }
+
+    const { data: paiementRows, error: paiementError } = await supabase
+      .from("client_paiements")
+      .select("*")
+      .order("date_paiement", { ascending: false });
+
+    if (paiementError) {
+      console.error("Chargement client_paiements impossible", paiementError);
+      return null;
+    }
+
+    return (clientRows || []).map((client) =>
+      dbClientToApp(
+        client,
+        (pieceRows || []).filter((p) => String(p.client_id) === String(client.id)),
+        (paiementRows || []).filter((p) => String(p.client_id) === String(client.id))
+      )
+    );
+  }
+
+  async function reloadClientsFromDb() {
+    const dbClients = await loadClientsFromDb();
+    if (dbClients) {
+      setClients(dbClients);
+      if (selectedClient) {
+        const fresh = dbClients.find((client) => String(client.id) === String(selectedClient.id));
+        setSelectedClient(fresh || null);
+      }
+      addHistory("Rechargement clients", "Clients rechargés depuis les tables professionnelles");
+    }
+  }
+
+  async function insertClientInDb(client) {
+    const payload = {
+      ...appClientToDb(client),
+      created_by: currentUser?.name || currentUser?.login || "system",
+    };
+
+    const { data, error } = await supabase
+      .from("clients")
+      .insert(payload)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return dbClientToApp(data, [], []);
+  }
+
+  async function updateClientInDb(id, client) {
+    const { data, error } = await supabase
+      .from("clients")
+      .update(appClientToDb(client))
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return dbClientToApp(data, client.pieces || [], client.archives || []);
+  }
+
+  async function deleteClientInDb(id) {
+    const { error } = await supabase
+      .from("clients")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+  }
+
+  async function insertClientPieceInDb(clientId, piece) {
+    const payload = {
+      ...appClientPieceToDb(piece, clientId),
+      created_by: currentUser?.name || currentUser?.login || "system",
+    };
+
+    const { data, error } = await supabase
+      .from("client_pieces")
+      .insert(payload)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    return {
+      id: data.id,
+      designation: data.designation || "",
+      reference: data.reference || "",
+      quantite: Number(data.quantite || 1),
+      prix: Number(data.prix ?? data.montant ?? 0),
+      statut: data.statut || "En cours",
+      date: data.date_piece || data.created_at || "",
+      createdAt: data.created_at || "",
+      updatedAt: data.updated_at || "",
+    };
+  }
+
+  async function updateClientPieceInDb(id, piece, clientId) {
+    const { data, error } = await supabase
+      .from("client_pieces")
+      .update(appClientPieceToDb(piece, clientId))
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    return {
+      id: data.id,
+      designation: data.designation || "",
+      reference: data.reference || "",
+      quantite: Number(data.quantite || 1),
+      prix: Number(data.prix ?? data.montant ?? 0),
+      statut: data.statut || "En cours",
+      date: data.date_piece || data.created_at || "",
+      createdAt: data.created_at || "",
+      updatedAt: data.updated_at || "",
+    };
+  }
+
+  async function deleteClientPieceInDb(id) {
+    const { error } = await supabase
+      .from("client_pieces")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+  }
+
+  async function insertClientPaymentInDb(clientId, paymentArchive) {
+    const { data, error } = await supabase
+      .from("client_paiements")
+      .insert({
+        client_id: clientId,
+        montant: Number(paymentArchive.montant || paymentArchive.total || 0),
+        mode_paiement: paymentArchive.mode || "",
+        pieces_payees: paymentArchive.pieces || [],
+        commentaire: paymentArchive.commentaire || "",
+        created_by: currentUser?.name || currentUser?.login || "system",
+      })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    return {
+      ...paymentArchive,
+      id: data.id,
+      montant: Number(data.montant || 0),
+      total: Number(data.montant || 0),
+      mode: data.mode_paiement || paymentArchive.mode || "",
+      commentaire: data.commentaire || "",
+      pieces: Array.isArray(data.pieces_payees) ? data.pieces_payees : paymentArchive.pieces || [],
+      date: data.date_paiement || data.created_at || new Date().toLocaleString("fr-FR"),
+      user: data.created_by || currentUser?.name || "-",
+    };
+  }
+
+  async function updateClientPaymentInDb(id, archive) {
+    const { data, error } = await supabase
+      .from("client_paiements")
+      .update({
+        montant: Number(archive.montant || archive.total || 0),
+        mode_paiement: archive.mode || "",
+        pieces_payees: archive.pieces || [],
+        commentaire: archive.commentaire || "",
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    return {
+      ...archive,
+      id: data.id,
+      montant: Number(data.montant || 0),
+      total: Number(data.montant || 0),
+      mode: data.mode_paiement || archive.mode || "",
+      commentaire: data.commentaire || "",
+      pieces: Array.isArray(data.pieces_payees) ? data.pieces_payees : archive.pieces || [],
+      date: data.date_paiement || data.created_at || archive.date,
+      user: data.created_by || archive.user || currentUser?.name || "-",
+    };
+  }
+
+  async function deleteClientPaymentInDb(id) {
+    const { error } = await supabase
+      .from("client_paiements")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+  }
+
   async function reloadCahierDevisFromDb() {
     const [dbCahier, dbDevis] = await Promise.all([loadCahierFromDb(), loadDevisFromDb()]);
 
@@ -800,7 +1073,8 @@ export default function App() {
         const professionalCahier = await loadCahierFromDb();
         setDevis(Array.isArray(professionalDevis) ? professionalDevis : remoteState.devis || []);
         setDevisRequests(Array.isArray(professionalCahier) ? professionalCahier : remoteState.devisRequests || []);
-        setClients(remoteState.clients || []);
+        const professionalClients = await loadClientsFromDb();
+        setClients(Array.isArray(professionalClients) ? professionalClients : remoteState.clients || []);
 
         const { data: remoteUsers, error: usersError } = await supabase
           .from("users_app")
@@ -864,7 +1138,8 @@ export default function App() {
             setOrderArchives(data.orderArchives || []);
             setDevis(data.devis || []);
             setDevisRequests(data.devisRequests || []);
-            setClients(data.clients || []);
+            const professionalClients = await loadClientsFromDb();
+            setClients(Array.isArray(professionalClients) ? professionalClients : data.clients || []);
           } catch {
             localStorage.removeItem("king_app_full");
           }
@@ -3166,7 +3441,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function saveClientArchiveEdit(e) {
+  async function saveClientArchiveEdit(e) {
     e.preventDefault();
 
     if (!selectedClient) return alert("Sélectionne un client.");
@@ -3175,64 +3450,93 @@ export default function App() {
     const montant = Number(clientPaymentForm.montant || 0);
     if (montant <= 0) return alert("Montant invalide.");
 
-    const updatedClients = clients.map((client) => {
-      if (client.id !== selectedClient.id) return client;
+    const oldArchive = (selectedClient.archives || []).find((archive) => archive.id === editingClientArchiveId);
+    if (!oldArchive) return alert("Archive introuvable.");
 
-      return {
-        ...client,
-        archives: (client.archives || []).map((archive) =>
-          archive.id === editingClientArchiveId
+    const archivePayload = {
+      ...oldArchive,
+      montant,
+      total: montant,
+      mode: clientPaymentForm.mode,
+      commentaire: clientPaymentForm.commentaire,
+      updatedAt: new Date().toLocaleString("fr-FR"),
+      updatedBy: currentUser?.name || "-",
+    };
+
+    try {
+      const savedArchive = await updateClientPaymentInDb(editingClientArchiveId, archivePayload);
+
+      const freshClients = await loadClientsFromDb();
+      if (freshClients) {
+        setClients(freshClients);
+        setSelectedClient(freshClients.find((c) => String(c.id) === String(selectedClient.id)));
+      } else {
+        const updatedClients = clients.map((client) =>
+          client.id === selectedClient.id
             ? {
-                ...archive,
-                montant,
-                total: montant,
-                mode: clientPaymentForm.mode,
-                commentaire: clientPaymentForm.commentaire,
-                updatedAt: new Date().toLocaleString("fr-FR"),
-                updatedBy: currentUser?.name || "-",
+                ...client,
+                archives: (client.archives || []).map((archive) =>
+                  archive.id === editingClientArchiveId ? savedArchive : archive
+                ),
               }
-            : archive
-        ),
-      };
-    });
+            : client
+        );
+        setClients(updatedClients);
+        setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
+      }
 
-    setClients(updatedClients);
-    setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
-    setEditingClientArchiveId(null);
-    setClientPaymentForm({ montant: "", mode: "Espèces", commentaire: "" });
+      setEditingClientArchiveId(null);
+      setClientPaymentForm({ montant: "", mode: "Espèces", commentaire: "" });
 
-    addHistory("Modification archive client", `${selectedClient.nom} — ${montant.toFixed(2)} €`);
+      addHistory("Modification archive client", `${selectedClient.nom} — ${montant.toFixed(2)} €`);
+    } catch (error) {
+      console.error("Erreur modification paiement client", error);
+      alert("Erreur Supabase : archive client non modifiée.");
+    }
   }
 
-  function cancelClientArchiveEdit() {
+    function cancelClientArchiveEdit() {
     setEditingClientArchiveId(null);
     setClientPaymentForm({ montant: "", mode: "Espèces", commentaire: "" });
   }
 
-  function deleteClientArchive(archiveId) {
+  async function deleteClientArchive(archiveId) {
     if (!selectedClient) return;
     if (!isAdmin) return alert("Seul l'administrateur peut supprimer une archive.");
 
     const archive = (selectedClient.archives || []).find((a) => a.id === archiveId);
     if (!window.confirm("Supprimer cette archive client ?")) return;
 
-    const updatedClients = clients.map((client) =>
-      client.id === selectedClient.id
-        ? { ...client, archives: (client.archives || []).filter((a) => a.id !== archiveId) }
-        : client
-    );
+    try {
+      await deleteClientPaymentInDb(archiveId);
 
-    setClients(updatedClients);
-    setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
-    setSelectedClientArchive(null);
+      const freshClients = await loadClientsFromDb();
+      if (freshClients) {
+        setClients(freshClients);
+        setSelectedClient(freshClients.find((c) => String(c.id) === String(selectedClient.id)));
+      } else {
+        const updatedClients = clients.map((client) =>
+          client.id === selectedClient.id
+            ? { ...client, archives: (client.archives || []).filter((a) => a.id !== archiveId) }
+            : client
+        );
+        setClients(updatedClients);
+        setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
+      }
 
-    addHistory(
-      "Suppression archive client",
-      `${selectedClient.nom} — ${Number(archive?.total || archive?.montant || 0).toFixed(2)} €`
-    );
+      setSelectedClientArchive(null);
+
+      addHistory(
+        "Suppression archive client",
+        `${selectedClient.nom} — ${Number(archive?.total || archive?.montant || 0).toFixed(2)} €`
+      );
+    } catch (error) {
+      console.error("Erreur suppression paiement client", error);
+      alert("Erreur Supabase : archive non supprimée.");
+    }
   }
 
-  function getSelectedClientPaymentTotal() {
+    function getSelectedClientPaymentTotal() {
     if (!selectedClient) return 0;
     return (selectedClient.pieces || [])
       .filter((p) => selectedClientPieceIds.includes(p.id))
@@ -3247,38 +3551,61 @@ export default function App() {
     setSelectedClientPieceIds([]);
   }
 
-  function addOrUpdateClient(e) {
+  async function addOrUpdateClient(e) {
     e.preventDefault();
     if (!clientForm.nom) return alert("Nom client obligatoire.");
-    if (editingClientId) {
-      const updatedClients = clients.map((client) =>
-        client.id === editingClientId
-          ? { ...client, nom: clientForm.nom, telephone: clientForm.telephone, adresse: clientForm.adresse, updatedAt: new Date().toLocaleString("fr-FR") }
-          : client
-      );
-      setClients(updatedClients);
-      if (selectedClient?.id === editingClientId) setSelectedClient(updatedClients.find((c) => c.id === editingClientId));
-      addHistory("Modification client", clientForm.nom);
-      cancelClientEdit();
-      return;
+
+    try {
+      if (editingClientId) {
+        const oldClient = clients.find((client) => client.id === editingClientId);
+        const updatedClient = await updateClientInDb(editingClientId, {
+          ...oldClient,
+          nom: clientForm.nom,
+          telephone: clientForm.telephone,
+          adresse: clientForm.adresse,
+        });
+
+        const freshClients = await loadClientsFromDb();
+        if (freshClients) {
+          setClients(freshClients);
+          if (selectedClient?.id === editingClientId) {
+            setSelectedClient(freshClients.find((c) => String(c.id) === String(editingClientId)));
+          }
+        } else {
+          const updatedClients = clients.map((client) => (client.id === editingClientId ? updatedClient : client));
+          setClients(updatedClients);
+          if (selectedClient?.id === editingClientId) setSelectedClient(updatedClients.find((c) => c.id === editingClientId));
+        }
+
+        addHistory("Modification client", clientForm.nom);
+        cancelClientEdit();
+        return;
+      }
+
+      const newClient = await insertClientInDb({
+        nom: clientForm.nom,
+        telephone: clientForm.telephone,
+        adresse: clientForm.adresse,
+      });
+
+      const freshClients = await loadClientsFromDb();
+      if (freshClients) {
+        setClients(freshClients);
+        setSelectedClient(freshClients.find((c) => String(c.id) === String(newClient.id)) || newClient);
+      } else {
+        setClients([newClient, ...clients]);
+        setSelectedClient(newClient);
+      }
+
+      addHistory("Création client", newClient.nom);
+      setClientForm({ nom: "", telephone: "", adresse: "" });
+    } catch (error) {
+      console.error("Erreur client Supabase", error);
+      alert("Erreur Supabase : client non enregistré.");
     }
-    const newClient = {
-      id: Date.now(),
-      nom: clientForm.nom,
-      telephone: clientForm.telephone,
-      adresse: clientForm.adresse,
-      pieces: [],
-      archives: [],
-      createdAt: new Date().toLocaleString("fr-FR"),
-      createdBy: currentUser?.name || "-",
-    };
-    setClients([newClient, ...clients]);
-    setSelectedClient(newClient);
-    addHistory("Création client", newClient.nom);
-    setClientForm({ nom: "", telephone: "", adresse: "" });
   }
 
-  function editClient(client) {
+    function editClient(client) {
     setEditingClientId(client.id);
     setClientForm({ nom: client.nom || "", telephone: client.telephone || "", adresse: client.adresse || "" });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -3289,76 +3616,101 @@ export default function App() {
     setClientForm({ nom: "", telephone: "", adresse: "" });
   }
 
-  function deleteClient(id) {
+  async function deleteClient(id) {
     if (!isAdmin) return alert("Seul l'administrateur peut supprimer un client.");
     const client = clients.find((c) => c.id === id);
     if (!window.confirm(`Supprimer le client ${client?.nom} ?`)) return;
-    setClients(clients.filter((c) => c.id !== id));
-    if (selectedClient?.id === id) setSelectedClient(null);
-    if (editingClientId === id) cancelClientEdit();
-    addHistory("Suppression client", client?.nom || "-");
+
+    try {
+      await deleteClientInDb(id);
+
+      setClients(clients.filter((c) => c.id !== id));
+      if (selectedClient?.id === id) setSelectedClient(null);
+      if (editingClientId === id) cancelClientEdit();
+      addHistory("Suppression client", client?.nom || "-");
+    } catch (error) {
+      console.error("Erreur suppression client", error);
+      alert("Erreur Supabase : client non supprimé.");
+    }
   }
 
-  function openClient(client) {
+    function openClient(client) {
     setSelectedClient(client);
     setEditingClientPieceId(null);
     setSelectedClientPieceIds([]);
     setClientPieceForm({ designation: "", reference: "", quantite: "1", prix: "" });
   }
 
-  function addOrUpdateClientPiece(e) {
+  async function addOrUpdateClientPiece(e) {
     e.preventDefault();
     if (!selectedClient) return alert("Sélectionne un client.");
     if (!clientPieceForm.designation) return alert("Nom de la pièce obligatoire.");
     if (!clientPieceForm.prix) return alert("Prix obligatoire.");
 
-    if (editingClientPieceId) {
-      const updatedClients = clients.map((client) => {
-        if (client.id !== selectedClient.id) return client;
-        return {
-          ...client,
-          pieces: (client.pieces || []).map((piece) =>
-            piece.id === editingClientPieceId
-              ? {
-                  ...piece,
-                  designation: clientPieceForm.designation,
-                  reference: clientPieceForm.reference,
-                  quantite: Number(clientPieceForm.quantite || 1),
-                  prix: Number(clientPieceForm.prix || 0),
-                  updatedAt: new Date().toLocaleString("fr-FR"),
-                }
-              : piece
-          ),
-        };
+    try {
+      if (editingClientPieceId) {
+        const savedPiece = await updateClientPieceInDb(
+          editingClientPieceId,
+          {
+            designation: clientPieceForm.designation,
+            reference: clientPieceForm.reference,
+            quantite: Number(clientPieceForm.quantite || 1),
+            prix: Number(clientPieceForm.prix || 0),
+            statut: "En cours",
+          },
+          selectedClient.id
+        );
+
+        const freshClients = await loadClientsFromDb();
+        if (freshClients) {
+          setClients(freshClients);
+          setSelectedClient(freshClients.find((c) => String(c.id) === String(selectedClient.id)));
+        } else {
+          const updatedClients = clients.map((client) => {
+            if (client.id !== selectedClient.id) return client;
+            return {
+              ...client,
+              pieces: (client.pieces || []).map((piece) => (piece.id === editingClientPieceId ? savedPiece : piece)),
+            };
+          });
+          setClients(updatedClients);
+          setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
+        }
+
+        addHistory("Modification pièce client", `${selectedClient.nom} — ${clientPieceForm.designation}`);
+        cancelClientPieceEdit();
+        return;
+      }
+
+      const savedPiece = await insertClientPieceInDb(selectedClient.id, {
+        designation: clientPieceForm.designation,
+        reference: clientPieceForm.reference,
+        quantite: Number(clientPieceForm.quantite || 1),
+        prix: Number(clientPieceForm.prix || 0),
+        statut: "En cours",
       });
-      setClients(updatedClients);
-      setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
-      addHistory("Modification pièce client", `${selectedClient.nom} — ${clientPieceForm.designation}`);
-      cancelClientPieceEdit();
-      return;
+
+      const freshClients = await loadClientsFromDb();
+      if (freshClients) {
+        setClients(freshClients);
+        setSelectedClient(freshClients.find((c) => String(c.id) === String(selectedClient.id)));
+      } else {
+        const updatedClients = clients.map((client) =>
+          client.id === selectedClient.id ? { ...client, pieces: [savedPiece, ...(client.pieces || [])] } : client
+        );
+        setClients(updatedClients);
+        setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
+      }
+
+      addHistory("Ajout pièce client", `${selectedClient.nom} — ${savedPiece.designation}`);
+      setClientPieceForm({ designation: "", reference: "", quantite: "1", prix: "" });
+    } catch (error) {
+      console.error("Erreur pièce client Supabase", error);
+      alert("Erreur Supabase : pièce client non enregistrée.");
     }
-
-    const newPiece = {
-      id: Date.now(),
-      designation: clientPieceForm.designation,
-      reference: clientPieceForm.reference,
-      quantite: Number(clientPieceForm.quantite || 1),
-      prix: Number(clientPieceForm.prix || 0),
-      date: new Date().toLocaleDateString("fr-FR"),
-      createdAt: new Date().toLocaleString("fr-FR"),
-      createdBy: currentUser?.name || "-",
-    };
-
-    const updatedClients = clients.map((client) =>
-      client.id === selectedClient.id ? { ...client, pieces: [newPiece, ...(client.pieces || [])] } : client
-    );
-    setClients(updatedClients);
-    setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
-    addHistory("Ajout pièce client", `${selectedClient.nom} — ${newPiece.designation}`);
-    setClientPieceForm({ designation: "", reference: "", quantite: "1", prix: "" });
   }
 
-  function editClientPiece(piece) {
+    function editClientPiece(piece) {
     setEditingClientPieceId(piece.id);
     setClientPieceForm({
       designation: piece.designation || "",
@@ -3373,27 +3725,44 @@ export default function App() {
     setClientPieceForm({ designation: "", reference: "", quantite: "1", prix: "" });
   }
 
-  function deleteClientPiece(pieceId) {
+  async function deleteClientPiece(pieceId) {
     if (!selectedClient) return;
     const piece = (selectedClient.pieces || []).find((p) => p.id === pieceId);
     if (!window.confirm(`Supprimer la pièce ${piece?.designation} ?`)) return;
-    const updatedClients = clients.map((client) =>
-      client.id === selectedClient.id ? { ...client, pieces: (client.pieces || []).filter((p) => p.id !== pieceId) } : client
-    );
-    setClients(updatedClients);
-    setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
-    setSelectedClientPieceIds((prev) => prev.filter((id) => id !== pieceId));
-    addHistory("Suppression pièce client", `${selectedClient.nom} — ${piece?.designation || "-"}`);
+
+    try {
+      await deleteClientPieceInDb(pieceId);
+
+      const freshClients = await loadClientsFromDb();
+      if (freshClients) {
+        setClients(freshClients);
+        setSelectedClient(freshClients.find((c) => String(c.id) === String(selectedClient.id)));
+      } else {
+        const updatedClients = clients.map((client) =>
+          client.id === selectedClient.id ? { ...client, pieces: (client.pieces || []).filter((p) => p.id !== pieceId) } : client
+        );
+        setClients(updatedClients);
+        setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
+      }
+
+      setSelectedClientPieceIds((prev) => prev.filter((id) => id !== pieceId));
+      addHistory("Suppression pièce client", `${selectedClient.nom} — ${piece?.designation || "-"}`);
+    } catch (error) {
+      console.error("Erreur suppression pièce client", error);
+      alert("Erreur Supabase : pièce client non supprimée.");
+    }
   }
 
-  function payClientPieces(e) {
+    async function payClientPieces(e) {
     e.preventDefault();
     if (!selectedClient) return alert("Sélectionne un client.");
+
     const montant = Number(clientPaymentForm.montant || 0);
     if (montant <= 0) return alert("Entre un montant de paiement valide.");
     if (!selectedClient.pieces || selectedClient.pieces.length === 0) return alert("Ce client n’a aucune pièce impayée.");
 
     let remainingPayment = montant;
+
     const targets =
       selectedClientPieceIds.length > 0
         ? selectedClient.pieces.filter((p) => selectedClientPieceIds.includes(p.id))
@@ -3402,16 +3771,14 @@ export default function App() {
     if (targets.length === 0) return alert("Sélectionne au moins une pièce ou laisse vide pour paiement automatique.");
 
     const paidPieces = [];
-    const updatedPieces = [];
+    const piecesToDelete = [];
+    const piecesToUpdate = [];
 
     selectedClient.pieces.forEach((piece) => {
       const isTarget = targets.some((p) => p.id === piece.id);
       const lineTotal = Number(piece.prix || 0) * Number(piece.quantite || 1);
 
-      if (!isTarget || remainingPayment <= 0) {
-        updatedPieces.push(piece);
-        return;
-      }
+      if (!isTarget || remainingPayment <= 0) return;
 
       if (remainingPayment >= lineTotal) {
         paidPieces.push({
@@ -3420,6 +3787,7 @@ export default function App() {
           prixPaye: lineTotal,
           paiementStatut: "Payé totalement",
         });
+        piecesToDelete.push(piece.id);
         remainingPayment -= lineTotal;
         return;
       }
@@ -3431,7 +3799,7 @@ export default function App() {
         paiementStatut: "Payé partiellement",
       });
 
-      updatedPieces.push({
+      piecesToUpdate.push({
         ...piece,
         quantite: 1,
         prix: Number((lineTotal - remainingPayment).toFixed(2)),
@@ -3457,23 +3825,39 @@ export default function App() {
       user: currentUser?.name || "-",
     };
 
-    const updatedClients = clients.map((client) =>
-      client.id === selectedClient.id
-        ? { ...client, pieces: updatedPieces, archives: [paymentArchive, ...(client.archives || [])] }
-        : client
-    );
+    try {
+      await insertClientPaymentInDb(selectedClient.id, paymentArchive);
 
-    setClients(updatedClients);
-    setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
-    setClientPaymentForm({ montant: "", mode: "Espèces", commentaire: "" });
-    setSelectedClientPieceIds([]);
-    addHistory("Paiement client", `${selectedClient.nom} — ${montantUtilise.toFixed(2)} € — ${clientPaymentForm.mode}`);
+      for (const pieceId of piecesToDelete) {
+        await deleteClientPieceInDb(pieceId);
+      }
+
+      for (const piece of piecesToUpdate) {
+        await updateClientPieceInDb(piece.id, piece, selectedClient.id);
+      }
+
+      const freshClients = await loadClientsFromDb();
+      if (freshClients) {
+        setClients(freshClients);
+        setSelectedClient(freshClients.find((c) => String(c.id) === String(selectedClient.id)));
+      }
+
+      setClientPaymentForm({ montant: "", mode: "Espèces", commentaire: "" });
+      setSelectedClientPieceIds([]);
+
+      addHistory("Paiement client", `${selectedClient.nom} — ${montantUtilise.toFixed(2)} € — ${clientPaymentForm.mode}`);
+    } catch (error) {
+      console.error("Erreur paiement client Supabase", error);
+      alert("Erreur Supabase : paiement client non enregistré.");
+    }
   }
 
-  function archiveAllClientPurchases() {
+    async function archiveAllClientPurchases() {
     if (!selectedClient) return;
     if (!selectedClient.pieces || selectedClient.pieces.length === 0) return alert("Aucune pièce à archiver.");
+
     const total = getClientTotal(selectedClient);
+
     const archive = {
       id: Date.now(),
       type: "Achats archivés",
@@ -3484,19 +3868,35 @@ export default function App() {
         paiementStatut: "Archivé sans paiement",
       })),
       total,
+      montant: total,
+      mode: "Archive",
+      commentaire: "Archivage manuel des achats client",
       date: new Date().toLocaleString("fr-FR"),
       user: currentUser?.name || "-",
     };
-    const updatedClients = clients.map((client) =>
-      client.id === selectedClient.id ? { ...client, pieces: [], archives: [archive, ...(client.archives || [])] } : client
-    );
-    setClients(updatedClients);
-    setSelectedClient(updatedClients.find((c) => c.id === selectedClient.id));
-    setSelectedClientPieceIds([]);
-    addHistory("Achats client archivés", `${selectedClient.nom} — ${total.toFixed(2)} €`);
+
+    try {
+      await insertClientPaymentInDb(selectedClient.id, archive);
+
+      for (const piece of selectedClient.pieces) {
+        await deleteClientPieceInDb(piece.id);
+      }
+
+      const freshClients = await loadClientsFromDb();
+      if (freshClients) {
+        setClients(freshClients);
+        setSelectedClient(freshClients.find((c) => String(c.id) === String(selectedClient.id)));
+      }
+
+      setSelectedClientPieceIds([]);
+      addHistory("Achats client archivés", `${selectedClient.nom} — ${total.toFixed(2)} €`);
+    } catch (error) {
+      console.error("Erreur archivage client Supabase", error);
+      alert("Erreur Supabase : archivage client non enregistré.");
+    }
   }
 
-  function changeUserForm(e) {
+    function changeUserForm(e) {
     setUserForm({ ...userForm, [e.target.name]: e.target.value });
   }
 
