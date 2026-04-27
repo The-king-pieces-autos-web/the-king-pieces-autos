@@ -387,8 +387,11 @@ export default function App() {
       .filter(Boolean)
       .join("\n");
 
+    const devisLignes = Array.isArray(row.devis_lignes) ? row.devis_lignes : [];
+
     return {
       id: row.id,
+      legacyId: row.legacy_id || "",
       cahierNumero: row.cahier_numero || "",
       type: row.canal || row.type_demande || "Sur place",
       statut: row.statut || "En attente",
@@ -408,19 +411,40 @@ export default function App() {
       createdAt: row.created_at || "",
       updatedAt: row.updated_at || "",
       devisNumero: row.devis_numero || "",
-      devisLignes: row.devis_lignes || [],
-      devisTotalTTC: row.total_ttc || 0,
+      devisLignes,
+      devisArchiveComplet: devisLignes.length
+        ? {
+            numero: row.devis_numero || "",
+            lignes: devisLignes,
+            totalToutesPiecesTTC: Number(row.total_ttc || 0),
+            totalPiecesValideesTTC: devisLignes
+              .filter((line) => line.confirmedByClient)
+              .reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0),
+          }
+        : null,
+      devisTotalTTC: Number(row.total_ttc || 0),
+      devisTotalToutesPiecesTTC: Number(row.total_ttc || 0),
+      devisTotalValideTTC: devisLignes
+        .filter((line) => line.confirmedByClient)
+        .reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0),
       sourceDb: "cahier_demandes",
     };
   }
 
     function appCahierToDb(request) {
     const id = String(request.id || Date.now());
+
     const piecesArray = parseRequestedPieces(request.piecesDemandees || "").map((designation, index) => ({
       id: index + 1,
       nom: designation,
       designation,
     }));
+
+    const devisLignes = request.devisLignes || request.devisArchiveComplet?.lignes || [];
+    const totalTTC =
+      Number(request.devisTotalToutesPiecesTTC || 0) ||
+      Number(request.devisArchiveComplet?.totalToutesPiecesTTC || 0) ||
+      devisLignes.reduce((sum, line) => sum + Number(line.totalFinalTTC || (Number(line.quantite || 0) * Number(line.prixFinalTTC || line.prixTTC || 0))), 0);
 
     return {
       id,
@@ -438,13 +462,13 @@ export default function App() {
       modele: request.modele || "",
       pieces: piecesArray,
       pieces_demandees: piecesArray,
-      devis_lignes: request.devisLignes || [],
+      devis_lignes: devisLignes,
       notes: request.notesInternes || "",
       notes_internes: request.notesInternes || "",
       demande_complete: request.notesInternes || "",
       statut: request.statut || "En attente",
-      devis_numero: request.devisNumero || "",
-      total_ttc: Number(request.devisTotalTTC || 0),
+      devis_numero: request.devisNumero || request.devisArchiveComplet?.numero || "",
+      total_ttc: Number(totalTTC || 0),
       created_by_login: request.createdByLogin || currentUser?.login || "",
       created_by_name: request.createdByName || currentUser?.name || "",
       created_at: request.createdAt || new Date().toISOString(),
@@ -2514,6 +2538,19 @@ export default function App() {
             marque: devisForm.marque || request.marque || "",
             modele: devisForm.modele || request.modele || "",
             piecesDemandees: allLinesForCahier.map((line) => line.designation).join("\n"),
+            devisNumero: numero,
+            devisLignes: allLinesForCahier,
+            devisArchiveComplet: {
+              numero,
+              lignes: allLinesForCahier,
+              totalToutesPiecesTTC: totalAllTTC,
+              totalPiecesValideesTTC: totalConfirmedTTC,
+              archivedAt: new Date().toLocaleString("fr-FR"),
+              archivedBy: currentUser?.name || "-",
+            },
+            devisTotalTTC: totalConfirmedTTC,
+            devisTotalToutesPiecesTTC: totalAllTTC,
+            devisTotalValideTTC: totalConfirmedTTC,
             notesInternes:
               `${request.notesInternes || ""}\n\nDevis ${numero} archivé : total toutes pièces ${totalAllTTC.toFixed(2)} €, total validé ${totalConfirmedTTC.toFixed(2)} €`.trim(),
             updatedAt: new Date().toLocaleString("fr-FR"),
@@ -4202,6 +4239,18 @@ export default function App() {
                       <p>Plaque : {request.plaque || "-"} — VIN : {request.vin || "-"}</p>
                       <p>Pièces : {String(request.piecesDemandees || "-").slice(0, 140)}</p>
                       <span>Statut : {request.statut} — Salarié : {request.createdByName || "-"} — {request.createdAt}</span>
+                      {(request.devisLignes?.length || 0) > 0 && (
+                        <div style={{ marginTop: "10px", padding: "10px", border: "1px solid #bfd4ff", borderRadius: "12px", background: "#f8fbff" }}>
+                          <strong>Détails devis complet enregistré</strong>
+                          <p>N° devis : {request.devisNumero || "-"}</p>
+                          {(request.devisLignes || []).map((line, idx) => (
+                            <p key={line.id || idx}>
+                              {idx + 1}. {line.designation || "-"} — Réf : {line.reference || "-"} — Prix : {Number(line.prixFinalTTC || line.prixTTC || 0).toFixed(2)} €
+                              — <b>{line.validationClient || (line.confirmedByClient ? "Validé client" : "Non validé client")}</b>
+                            </p>
+                          ))}
+                        </div>
+                      )}
                       {(request.devisArchiveComplet || request.devisLignes?.length > 0) && (
                         <span>
                           Devis archivé : {request.devisNumero || "-"} —
