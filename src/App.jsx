@@ -639,6 +639,22 @@ export default function App() {
     return `DV-${year}-${String(nextNumber).padStart(5, "0")}`;
   }
 
+  function nextCahierNumero() {
+    const login = currentUser?.login || "user";
+    const year = new Date().getFullYear();
+    const prefix = `CH-${login.toUpperCase()}-${year}`;
+
+    const userNumbers = devisRequests
+      .filter((request) => request.createdByLogin === login)
+      .map((request) => String(request.cahierNumero || ""))
+      .filter((numero) => numero.startsWith(prefix))
+      .map((numero) => Number(numero.split("-").pop() || 0))
+      .filter((n) => !Number.isNaN(n));
+
+    const nextNumber = userNumbers.length ? Math.max(...userNumbers) + 1 : 1;
+    return `${prefix}-${String(nextNumber).padStart(4, "0")}`;
+  }
+
   function addHistory(action, details) {
     setHistory((prev) => [
       {
@@ -1205,6 +1221,7 @@ export default function App() {
 
     const payload = {
       id: editingDevisRequestId || Date.now(),
+      cahierNumero: old?.cahierNumero || nextCahierNumero(),
       ...devisRequestForm,
       createdByLogin: old?.createdByLogin || currentUser?.login || "-",
       createdByName: old?.createdByName || currentUser?.name || "-",
@@ -1315,6 +1332,7 @@ export default function App() {
           prixTTC: "",
           priceType: "demande",
           sourceRequestId: request.id,
+          confirmedByClient: false,
         }))
       );
     }
@@ -1676,6 +1694,59 @@ export default function App() {
     addHistory("Impression archive devis", `${title} — ${list.length} devis`);
   }
 
+  function toggleLineConfirmedByClient(lineId) {
+    setDevisLines((prev) =>
+      prev.map((line) =>
+        line.id === lineId
+          ? { ...line, confirmedByClient: !line.confirmedByClient }
+          : line
+      )
+    );
+  }
+
+  function selectAllLinesConfirmedByClient() {
+    setDevisLines((prev) => prev.map((line) => ({ ...line, confirmedByClient: true })));
+  }
+
+  function clearLinesConfirmedByClient() {
+    setDevisLines((prev) => prev.map((line) => ({ ...line, confirmedByClient: false })));
+  }
+
+  function getDevisLinesWithValidationNotes() {
+    return devisLines.map((line) => ({
+      ...line,
+      validationClient: line.confirmedByClient ? "Validé par le client" : "Non validé par le client",
+    }));
+  }
+
+  function removeConfirmedStockLinesFromStock() {
+    const confirmedStockLines = devisLines.filter((line) => line.confirmedByClient && line.sourceStockId);
+
+    if (confirmedStockLines.length === 0) return;
+
+    setPieces((prevPieces) =>
+      prevPieces.map((piece) => {
+        const totalSold = confirmedStockLines
+          .filter((line) => line.sourceStockId === piece.id)
+          .reduce((sum, line) => sum + Number(line.quantite || 0), 0);
+
+        if (totalSold <= 0) return piece;
+
+        return {
+          ...piece,
+          quantite: Math.max(0, Number(piece.quantite || 0) - totalSold),
+          updatedAt: new Date().toLocaleString("fr-FR"),
+          updatedBy: currentUser?.name || "-",
+        };
+      })
+    );
+
+    addHistory(
+      "Retrait stock devis validé",
+      `${confirmedStockLines.length} ligne(s) validée(s) par le client`
+    );
+  }
+
   function changeDevisForm(e) {
     setDevisForm({ ...devisForm, [e.target.name]: e.target.value });
   }
@@ -1814,17 +1885,18 @@ export default function App() {
     setDevisLine({ designation: "", reference: "", quantite: "1", prixTTC: "", deuxOffres: false, fournisseur1: "", dateDispo1: "Sur place", reference2: "", prixTTC2: "", fournisseur2: "", dateDispo2: "", offreChoisie: "offre1" });
   }
 
-  function saveDevis(status = "Brouillon") {
+  function saveDevis(status = "Archivé") {
     if (!devisForm.client) return alert("Nom client obligatoire.");
     if (devisLines.length === 0) return alert("Ajoute au moins une ligne au devis.");
 
     const numero = devisForm.numero || nextDevisNumero();
+    const lignesAvecValidation = getDevisLinesWithValidationNotes();
 
     const savedDevis = {
       id: editingDevisId || Date.now(),
       ...devisForm,
       numero,
-      lignes: devisLines,
+      lignes: lignesAvecValidation,
       sousTotalHT: devisTotals.sousTotalHT,
       sousTotalTTC: devisTotals.sousTotalTTC,
       remiseHT: devisTotals.remiseHT,
@@ -1832,13 +1904,23 @@ export default function App() {
       totalHT: devisTotals.totalHT,
       tva: devisTotals.tva,
       totalTTC: devisTotals.totalTTC,
-      status,
+      status: "Archivé",
       createdBy: currentUser?.name || "-",
       createdAt: editingDevisId
         ? devis.find((d) => d.id === editingDevisId)?.createdAt || new Date().toLocaleString("fr-FR")
         : new Date().toLocaleString("fr-FR"),
       updatedAt: new Date().toLocaleString("fr-FR"),
     };
+
+    removeConfirmedStockLinesFromStock();
+
+    if (editingDevisId) {
+      setDevis(devis.map((d) => (d.id === editingDevisId ? savedDevis : d)));
+      addHistory("Modification devis validé", `${numero} — ${devisForm.client}`);
+    } else {
+      setDevis([savedDevis, ...devis]);
+      addHistory("Devis validé", `${numero} — ${devisForm.client}`);
+    }
 
     if (devisForm.demandeId) {
       setDevisRequests((prev) =>
@@ -1855,7 +1937,7 @@ export default function App() {
                 modele: devisForm.modele || request.modele || "",
                 devis: savedDevis,
                 devisNumero: numero,
-                devisLignes: devisLines,
+                devisLignes: lignesAvecValidation,
                 devisSousTotalHT: devisTotals.sousTotalHT,
                 devisSousTotalTTC: devisTotals.sousTotalTTC,
                 devisRemiseHT: devisTotals.remiseHT,
@@ -1871,22 +1953,7 @@ export default function App() {
         )
       );
 
-      addHistory(
-        "Devis enregistré dans la demande Cahier",
-        `${devisForm.client || "-"} — ${numero} — ${Number(devisTotals.totalTTC || 0).toFixed(2)} €`
-      );
-
-      resetDevisDraft();
-      setModuleActif("Cahier");
-      return;
-    }
-
-    if (editingDevisId) {
-      setDevis(devis.map((d) => (d.id === editingDevisId ? savedDevis : d)));
-      addHistory("Modification devis", `${numero} — ${devisForm.client}`);
-    } else {
-      setDevis([savedDevis, ...devis]);
-      addHistory(status === "Archivé" ? "Devis archivé" : "Devis enregistré", `${numero} — ${devisForm.client}`);
+      addHistory("Cahier mis à jour avec devis validé", `${devisForm.client || "-"} — ${numero}`);
     }
 
     resetDevisDraft();
@@ -3554,7 +3621,7 @@ export default function App() {
                       onClick={() => setSelectedDevisRequest(request)}
                       style={{ border: isOwner ? "2px solid #123f8f" : undefined }}
                     >
-                      <strong>{request.type} — {request.client || "Client sans nom"}</strong>
+                      <strong>{request.cahierNumero || "Cahier"} — {request.type} — {request.client || "Client sans nom"}</strong>
                       <p>Plaque : {request.plaque || "-"} — VIN : {request.vin || "-"}</p>
                       <p>Pièces : {String(request.piecesDemandees || "-").slice(0, 140)}</p>
                       <span>Statut : {request.statut} — Salarié : {request.createdByName || "-"} — {request.createdAt}</span>
@@ -3598,7 +3665,7 @@ export default function App() {
                 <span>01</span>
                 <div>
                   <h3>{editingDevisId ? "Modifier le devis final" : "Devis final"}</h3>
-                  <p>Ouvre une demande depuis le Cahier : les pièces demandées arrivent ici. Les pièces cochées avec stock seront retirées du stock quand elles sont vendues.</p>
+                  <p>Ouvre une demande depuis le Cahier : les pièces demandées arrivent ici. Coche seulement les pièces validées par le client. Les pièces validées venant du stock seront retirées du stock à la validation.</p>
                 </div>
               </div>
 
@@ -3672,7 +3739,7 @@ export default function App() {
                   <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: "18px", overflow: "hidden", border: "1px solid rgba(191, 212, 255, 0.85)" }}>
                     <thead>
                       <tr style={{ background: "#123f8f", color: "white" }}>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Vendu</th>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Validé client</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>N°</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Désignation</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Référence interne</th>
@@ -3688,12 +3755,14 @@ export default function App() {
                           <td style={{ padding: "12px" }}>
                             <input
                               type="checkbox"
-                              checked={Boolean(devisSoldSelection[line.id])}
-                              disabled={!line.sourceStockId}
-                              onChange={() => toggleDevisSoldLine(line.id)}
-                              title={line.sourceStockId ? "Retirer du stock si vendu" : "Cette pièce ne vient pas du stock"}
+                              checked={Boolean(line.confirmedByClient)}
+                              onChange={() => toggleLineConfirmedByClient(line.id)}
+                              title="Coche seulement les pièces validées par le client"
                               style={{ width: "18px", height: "18px" }}
                             />
+                            <div style={{ fontSize: "10px", marginTop: "4px", color: line.confirmedByClient ? "#16a34a" : "#dc2626", fontWeight: "900" }}>
+                              {line.confirmedByClient ? "Validé" : "Non validé"}
+                            </div>
                           </td>
                           <td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td>
                           <td style={{ padding: "12px" }}>{line.designation}</td>
@@ -3808,14 +3877,13 @@ export default function App() {
               </section>
 
               <div className="actions" style={{ marginTop: "16px" }}>
-                <button type="button" onClick={selectAllStockLinesForSale}>Sélectionner pièces stock vendues</button>
-                <button type="button" onClick={clearSoldLineSelection}>Décocher vente</button>
-                <button type="button" onClick={applySoldLinesToStock}>Retirer du stock les pièces cochées</button>
+                <button type="button" onClick={selectAllLinesConfirmedByClient}>Tout valider client</button>
+                <button type="button" onClick={clearLinesConfirmedByClient}>Tout mettre non validé</button>
               </div>
 
               <div className="actions" style={{ marginTop: "16px" }}>
                 <button onClick={() => saveDevis("Archivé")}>
-                  {devisForm.demandeId ? "Valider le devis dans le Cahier" : "Valider le devis"}
+                  {devisForm.demandeId ? "Valider le devis et le Cahier" : "Valider le devis"}
                 </button>
                 <button className="delete" onClick={resetDevisDraft}>Vider devis</button>
               </div>
@@ -3857,34 +3925,6 @@ export default function App() {
               </div>
             </section>
 
-            <section className="panel stockPanel">
-              <div className="panelTitle">
-                <span>03</span>
-                <div>
-                  <h3>Archives devis jour / mois</h3>
-                  <p>Les devis sont regroupés par jour et par mois. Tu peux imprimer les archives.</p>
-                </div>
-              </div>
-
-              <div className="form" style={{ marginBottom: "16px" }}>
-                <input type="date" value={devisArchiveDate} onChange={(e) => setDevisArchiveDate(e.target.value)} />
-                <button type="button" onClick={() => printDevisArchiveList(getDevisArchiveByDate(devisArchiveDate), `Archives devis du ${new Date(devisArchiveDate).toLocaleDateString("fr-FR")}`)}>
-                  Imprimer jour
-                </button>
-
-                <input type="month" value={devisArchiveMonth} onChange={(e) => setDevisArchiveMonth(e.target.value)} />
-                <button type="button" onClick={() => printDevisArchiveList(getDevisArchiveByMonth(devisArchiveMonth), `Archives devis du mois ${devisArchiveMonth}`)}>
-                  Imprimer mois
-                </button>
-              </div>
-
-              <section className="stats">
-                <div><span>Jour sélectionné</span><strong>{getDevisArchiveByDate(devisArchiveDate).length}</strong></div>
-                <div><span>Total jour</span><strong>{getDevisArchiveByDate(devisArchiveDate).reduce((s, d) => s + Number(d.totalTTC || 0), 0).toFixed(2)} €</strong></div>
-                <div><span>Mois sélectionné</span><strong>{getDevisArchiveByMonth(devisArchiveMonth).length}</strong></div>
-                <div><span>Total mois</span><strong>{getDevisArchiveByMonth(devisArchiveMonth).reduce((s, d) => s + Number(d.totalTTC || 0), 0).toFixed(2)} €</strong></div>
-              </section>
-            </section>
           </>
         )}
 
@@ -4202,7 +4242,7 @@ export default function App() {
         <div className="modalOverlay" onClick={() => setSelectedDevisRequest(null)}>
           <div className="modalCard" onClick={(e) => e.stopPropagation()}>
             <button className="modalClose" onClick={() => setSelectedDevisRequest(null)}>×</button>
-            <h2>Demande devis — {selectedDevisRequest.client || "Client sans nom"}</h2>
+            <h2>{selectedDevisRequest.cahierNumero || "Demande"} — {selectedDevisRequest.client || "Client sans nom"}</h2>
             <div className="modalGrid"><p><b>Type :</b> {selectedDevisRequest.type}</p><p><b>Statut :</b> {selectedDevisRequest.statut}</p><p><b>Client :</b> {selectedDevisRequest.client || "-"}</p><p><b>Type client :</b> {selectedDevisRequest.clientType || "-"}</p><p><b>Téléphone :</b> {selectedDevisRequest.telephone || "-"}</p><p><b>WhatsApp :</b> {selectedDevisRequest.whatsapp || "-"}</p><p><b>Plaque :</b> {selectedDevisRequest.plaque || "-"}</p><p><b>VIN :</b> {selectedDevisRequest.vin || "-"}</p><p><b>Véhicule :</b> {selectedDevisRequest.marque || "-"} {selectedDevisRequest.modele || ""}</p><p><b>Salarié :</b> {selectedDevisRequest.createdByName || "-"}</p><p><b>Date :</b> {selectedDevisRequest.createdAt || "-"}</p><p><b>Prix annoncé :</b> {selectedDevisRequest.prixAnnonce || "-"} €</p></div>
             <div className="historyList" style={{ marginTop: "18px" }}><div className="historyItem"><strong>Pièces demandées</strong><p style={{ whiteSpace: "pre-wrap" }}>{selectedDevisRequest.piecesDemandees || "-"}</p></div><div className="historyItem"><strong>Notes internes</strong><p style={{ whiteSpace: "pre-wrap" }}>{selectedDevisRequest.notesInternes || "-"}</p></div></div>
             <div className="actions" style={{ marginTop: "18px" }}><button onClick={() => printDevisRequest(selectedDevisRequest)}>Imprimer</button><button onClick={() => editDevisRequest(selectedDevisRequest)}>Modifier</button><button onClick={() => createDevisFromRequest(selectedDevisRequest)}>Ouvrir dans devis</button><button className="delete" onClick={() => deleteDevisRequest(selectedDevisRequest.id)}>Supprimer</button></div>
