@@ -4362,12 +4362,155 @@ export default function App() {
 
       {selectedDevisRequest && (
         <div className="modalOverlay" onClick={() => setSelectedDevisRequest(null)}>
-          <div className="modalCard" onClick={(e) => e.stopPropagation()}>
+          <div className="modalCard" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "980px" }}>
             <button className="modalClose" onClick={() => setSelectedDevisRequest(null)}>×</button>
-            <h2>{selectedDevisRequest.cahierNumero || "Demande"} — {selectedDevisRequest.client || "Client sans nom"}</h2>
-            <div className="modalGrid"><p><b>Type :</b> {selectedDevisRequest.type}</p><p><b>Statut :</b> {selectedDevisRequest.statut}</p><p><b>Client :</b> {selectedDevisRequest.client || "-"}</p><p><b>Type client :</b> {selectedDevisRequest.clientType || "-"}</p><p><b>Téléphone :</b> {selectedDevisRequest.telephone || "-"}</p><p><b>WhatsApp :</b> {selectedDevisRequest.whatsapp || "-"}</p><p><b>Plaque :</b> {selectedDevisRequest.plaque || "-"}</p><p><b>VIN :</b> {selectedDevisRequest.vin || "-"}</p><p><b>Véhicule :</b> {selectedDevisRequest.marque || "-"} {selectedDevisRequest.modele || ""}</p><p><b>Salarié :</b> {selectedDevisRequest.createdByName || "-"}</p><p><b>Date :</b> {selectedDevisRequest.createdAt || "-"}</p><p><b>Prix annoncé :</b> {selectedDevisRequest.prixAnnonce || "-"} €</p></div>
-            <div className="historyList" style={{ marginTop: "18px" }}><div className="historyItem"><strong>Pièces demandées</strong><p style={{ whiteSpace: "pre-wrap" }}>{selectedDevisRequest.piecesDemandees || "-"}</p></div><div className="historyItem"><strong>Notes internes</strong><p style={{ whiteSpace: "pre-wrap" }}>{selectedDevisRequest.notesInternes || "-"}</p></div></div>
-            <div className="actions" style={{ marginTop: "18px" }}><button onClick={() => printDevisRequest(selectedDevisRequest)}>Imprimer</button><button onClick={() => editDevisRequest(selectedDevisRequest)}>Modifier</button><button onClick={() => createDevisFromRequest(selectedDevisRequest)}>Ouvrir dans devis</button><button className="delete" onClick={() => deleteDevisRequest(selectedDevisRequest.id)}>Supprimer</button></div>
+
+            <div
+              style={{
+                background: "#fff",
+                color: "#10234d",
+                borderRadius: "18px",
+                padding: "18px",
+                border: "1px solid #d9e3f2",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderBottom: "3px solid #123f8f",
+                  paddingBottom: "14px",
+                  marginBottom: "16px",
+                  gap: "16px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                  <img src={logo} alt={ENTREPRISE.nom} style={{ width: "76px", height: "76px", objectFit: "contain" }} />
+                  <div>
+                    <h2 style={{ margin: 0, color: "#123f8f", fontSize: "24px" }}>{ENTREPRISE.nom}</h2>
+                    <p style={{ margin: "4px 0", fontWeight: 700 }}>📍 {ENTREPRISE.adresse}</p>
+                    <p style={{ margin: "4px 0", fontWeight: 700 }}>📧 {ENTREPRISE.email}</p>
+                    <p style={{ margin: "4px 0", fontWeight: 700 }}>☎ {ENTREPRISE.telephone} — WhatsApp {ENTREPRISE.whatsapp}</p>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: "right" }}>
+                  <h2 style={{ margin: 0, color: "#123f8f", fontSize: "26px" }}>DEMANDE / CAHIER</h2>
+                  <p style={{ margin: "5px 0" }}><b>N° cahier :</b> {selectedDevisRequest.cahierNumero || "-"}</p>
+                  <p style={{ margin: "5px 0" }}><b>N° devis :</b> {selectedDevisRequest.devisNumero || "-"}</p>
+                  <p style={{ margin: "5px 0" }}><b>Statut :</b> {selectedDevisRequest.statut || "-"}</p>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
+                <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px" }}>
+                  <h3 style={{ margin: "0 0 8px", color: "#123f8f" }}>Client</h3>
+                  <p><b>Nom :</b> {selectedDevisRequest.client || "-"}</p>
+                  <p><b>Téléphone :</b> {selectedDevisRequest.telephone || "-"}</p>
+                  <p><b>WhatsApp :</b> {selectedDevisRequest.whatsapp || "-"}</p>
+                  <p><b>Type client :</b> {selectedDevisRequest.clientType || "-"}</p>
+                </div>
+
+                <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px" }}>
+                  <h3 style={{ margin: "0 0 8px", color: "#123f8f" }}>Véhicule</h3>
+                  <p><b>Plaque :</b> {selectedDevisRequest.plaque || "-"}</p>
+                  <p><b>VIN :</b> {selectedDevisRequest.vin || "-"}</p>
+                  <p><b>Marque :</b> {selectedDevisRequest.marque || "-"}</p>
+                  <p><b>Modèle :</b> {selectedDevisRequest.modele || "-"}</p>
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px", marginBottom: "14px" }}>
+                <h3 style={{ margin: "0 0 8px", color: "#123f8f" }}>Demande initiale</h3>
+                <p><b>Origine :</b> {selectedDevisRequest.type || "-"}</p>
+                <p><b>Salarié :</b> {selectedDevisRequest.createdByName || "-"}</p>
+                <p><b>Date :</b> {selectedDevisRequest.createdAt || "-"}</p>
+                <p><b>Pièces demandées :</b></p>
+                <p style={{ whiteSpace: "pre-wrap", background: "#f8fbff", borderRadius: "10px", padding: "10px" }}>
+                  {selectedDevisRequest.piecesDemandees || "-"}
+                </p>
+              </div>
+
+              {((selectedDevisRequest.devisArchiveComplet?.lignes?.length || 0) > 0 || (selectedDevisRequest.devisLignes?.length || 0) > 0) && (
+                <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px", marginBottom: "14px" }}>
+                  <h3 style={{ margin: "0 0 10px", color: "#123f8f" }}>Devis archivé complet</h3>
+
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: "12px", overflow: "hidden" }}>
+                      <thead>
+                        <tr style={{ background: "#123f8f", color: "white" }}>
+                          <th style={{ padding: "10px", textAlign: "left" }}>N°</th>
+                          <th style={{ padding: "10px", textAlign: "left" }}>Pièce</th>
+                          <th style={{ padding: "10px", textAlign: "left" }}>Référence</th>
+                          <th style={{ padding: "10px", textAlign: "left" }}>Qté</th>
+                          <th style={{ padding: "10px", textAlign: "left" }}>Prix</th>
+                          <th style={{ padding: "10px", textAlign: "left" }}>Total</th>
+                          <th style={{ padding: "10px", textAlign: "left" }}>Validation client</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedDevisRequest.devisArchiveComplet?.lignes || selectedDevisRequest.devisLignes || []).map((line, index) => (
+                          <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2" }}>
+                            <td style={{ padding: "10px", fontWeight: "900" }}>{index + 1}</td>
+                            <td style={{ padding: "10px" }}>{line.designation || "-"}</td>
+                            <td style={{ padding: "10px" }}>
+                              {line.reference || "-"}
+                              {line.reference2 && <div style={{ marginTop: "4px", color: "#64748b" }}>Offre 2 : {line.reference2}</div>}
+                            </td>
+                            <td style={{ padding: "10px" }}>{line.quantite || 1}</td>
+                            <td style={{ padding: "10px" }}>
+                              {Number(line.prixFinalTTC || line.prixTTC || 0).toFixed(2)} €
+                              {line.prixTTC2 && <div style={{ marginTop: "4px", color: "#64748b" }}>Offre 2 : {Number(line.prixTTC2 || 0).toFixed(2)} €</div>}
+                            </td>
+                            <td style={{ padding: "10px", fontWeight: "900" }}>
+                              {Number(line.totalFinalTTC || (Number(line.quantite || 0) * Number(line.prixFinalTTC || line.prixTTC || 0))).toFixed(2)} €
+                            </td>
+                            <td style={{ padding: "10px", fontWeight: "900", color: line.confirmedByClient ? "#16a34a" : "#dc2626" }}>
+                              {line.validationClient || (line.confirmedByClient ? "Validé par le client" : "Non validé par le client")}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "12px", marginTop: "14px" }}>
+                    <div style={{ background: "#f8fbff", border: "1px solid #d9e3f2", borderRadius: "12px", padding: "12px" }}>
+                      <span style={{ color: "#64748b", fontWeight: "800" }}>Total toutes pièces</span>
+                      <strong style={{ display: "block", color: "#123f8f", fontSize: "20px" }}>
+                        {Number(selectedDevisRequest.devisTotalToutesPiecesTTC || selectedDevisRequest.devisArchiveComplet?.totalToutesPiecesTTC || 0).toFixed(2)} €
+                      </strong>
+                    </div>
+
+                    <div style={{ background: "#000", color: "white", borderRadius: "12px", padding: "12px" }}>
+                      <span style={{ fontWeight: "800" }}>Total validé client</span>
+                      <strong style={{ display: "block", fontSize: "20px" }}>
+                        {Number(selectedDevisRequest.devisTotalValideTTC || selectedDevisRequest.devisArchiveComplet?.totalPiecesValideesTTC || 0).toFixed(2)} €
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px", marginBottom: "14px" }}>
+                <h3 style={{ margin: "0 0 8px", color: "#123f8f" }}>Notes internes</h3>
+                <p style={{ whiteSpace: "pre-wrap" }}>{selectedDevisRequest.notesInternes || "-"}</p>
+              </div>
+
+              <div style={{ borderTop: "2px solid #123f8f", paddingTop: "10px", textAlign: "center", color: "#555", fontSize: "12px" }}>
+                {ENTREPRISE.nom} — {ENTREPRISE.adresse}<br/>
+                Email : {ENTREPRISE.email} — Téléphone : {ENTREPRISE.telephone} — WhatsApp : {ENTREPRISE.whatsapp}<br/>
+                TVA : {ENTREPRISE.tva}
+              </div>
+            </div>
+
+            <div className="actions" style={{ marginTop: "18px" }}>
+              <button onClick={() => printDevisRequest(selectedDevisRequest)}>Imprimer</button>
+              <button onClick={() => editDevisRequest(selectedDevisRequest)}>Modifier</button>
+              <button onClick={() => createDevisFromRequest(selectedDevisRequest)}>Ouvrir dans devis</button>
+              <button className="delete" onClick={() => deleteDevisRequest(selectedDevisRequest.id)}>Supprimer</button>
+            </div>
           </div>
         </div>
       )}
