@@ -1333,6 +1333,7 @@ export default function App() {
           priceType: "demande",
           sourceRequestId: request.id,
           confirmedByClient: false,
+          confirmedByClient: false,
         }))
       );
     }
@@ -1464,6 +1465,47 @@ export default function App() {
         return text.includes(q);
       })
       .slice(0, 12);
+  }
+
+  function decreaseStockFromDevisLine(line) {
+    if (!line.sourceStockId) {
+      return alert("Cette ligne n'est pas liée à une pièce du stock.");
+    }
+
+    const piece = pieces.find((p) => p.id === line.sourceStockId);
+    if (!piece) return alert("Pièce stock introuvable.");
+
+    const qty = Number(line.quantite || 1);
+
+    if (!window.confirm(`Retirer ${qty} pièce(s) du stock pour : ${piece.designation} ?`)) return;
+
+    setPieces((prevPieces) =>
+      prevPieces.map((p) =>
+        p.id === line.sourceStockId
+          ? {
+              ...p,
+              quantite: Math.max(0, Number(p.quantite || 0) - qty),
+              updatedAt: new Date().toLocaleString("fr-FR"),
+              updatedBy: currentUser?.name || "-",
+            }
+          : p
+      )
+    );
+
+    setDevisLines((prevLines) =>
+      prevLines.map((l) =>
+        l.id === line.id
+          ? {
+              ...l,
+              stockRetire: true,
+              stockRetireAt: new Date().toLocaleString("fr-FR"),
+              stockRetireBy: currentUser?.name || "-",
+            }
+          : l
+      )
+    );
+
+    addHistory("Stock retiré depuis devis", `${piece.designation} — quantité ${qty}`);
   }
 
   function applyStockPieceToDevisLine(lineId, piece, priceType) {
@@ -1890,20 +1932,36 @@ export default function App() {
     if (devisLines.length === 0) return alert("Ajoute au moins une ligne au devis.");
 
     const numero = devisForm.numero || nextDevisNumero();
-    const lignesAvecValidation = getDevisLinesWithValidationNotes();
+
+    const allLinesForCahier = devisLines.map((line) => ({
+      ...line,
+      validationClient: line.confirmedByClient ? "Validé par le client" : "Non validé par le client",
+      prixFinalTTC: getLineUnitPrice(line),
+      totalFinalTTC: getLineTotal(line),
+    }));
+
+    const confirmedLinesForDevis = allLinesForCahier.filter((line) => line.confirmedByClient);
+
+    if (confirmedLinesForDevis.length === 0) {
+      return alert("Coche au moins une pièce validée par le client avant de valider le devis.");
+    }
+
+    const totalConfirmedTTC = confirmedLinesForDevis.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
+    const totalConfirmedHT = totalConfirmedTTC / 1.2;
+    const tvaConfirmed = totalConfirmedTTC - totalConfirmedHT;
 
     const savedDevis = {
       id: editingDevisId || Date.now(),
       ...devisForm,
       numero,
-      lignes: lignesAvecValidation,
-      sousTotalHT: devisTotals.sousTotalHT,
-      sousTotalTTC: devisTotals.sousTotalTTC,
-      remiseHT: devisTotals.remiseHT,
-      remiseTTC: devisTotals.remiseTTC,
-      totalHT: devisTotals.totalHT,
-      tva: devisTotals.tva,
-      totalTTC: devisTotals.totalTTC,
+      lignes: confirmedLinesForDevis,
+      sousTotalHT: totalConfirmedHT,
+      sousTotalTTC: totalConfirmedTTC,
+      remiseHT: 0,
+      remiseTTC: 0,
+      totalHT: totalConfirmedHT,
+      tva: tvaConfirmed,
+      totalTTC: totalConfirmedTTC,
       status: "Archivé",
       createdBy: currentUser?.name || "-",
       createdAt: editingDevisId
@@ -1911,8 +1969,6 @@ export default function App() {
         : new Date().toLocaleString("fr-FR"),
       updatedAt: new Date().toLocaleString("fr-FR"),
     };
-
-    removeConfirmedStockLinesFromStock();
 
     if (editingDevisId) {
       setDevis(devis.map((d) => (d.id === editingDevisId ? savedDevis : d)));
@@ -1935,17 +1991,18 @@ export default function App() {
                 vin: devisForm.vin || request.vin || "",
                 marque: devisForm.marque || request.marque || "",
                 modele: devisForm.modele || request.modele || "",
+                devisArchiveComplet: {
+                  ...savedDevis,
+                  lignes: allLinesForCahier,
+                  totalToutesPiecesTTC: allLinesForCahier.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0),
+                  totalPiecesValideesTTC: totalConfirmedTTC,
+                },
                 devis: savedDevis,
                 devisNumero: numero,
-                devisLignes: lignesAvecValidation,
-                devisSousTotalHT: devisTotals.sousTotalHT,
-                devisSousTotalTTC: devisTotals.sousTotalTTC,
-                devisRemiseHT: devisTotals.remiseHT,
-                devisRemiseTTC: devisTotals.remiseTTC,
-                devisTotalHT: devisTotals.totalHT,
-                devisTVA: devisTotals.tva,
-                devisTotalTTC: devisTotals.totalTTC,
-                notesInternes: devisForm.notesInternes || request.notesInternes || "",
+                devisLignes: allLinesForCahier,
+                devisTotalToutesPiecesTTC: allLinesForCahier.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0),
+                devisTotalValideTTC: totalConfirmedTTC,
+                devisTotalTTC: totalConfirmedTTC,
                 updatedAt: new Date().toLocaleString("fr-FR"),
                 updatedBy: currentUser?.name || "-",
               }
@@ -1953,7 +2010,7 @@ export default function App() {
         )
       );
 
-      addHistory("Cahier mis à jour avec devis validé", `${devisForm.client || "-"} — ${numero}`);
+      addHistory("Cahier archivé complet", `${devisForm.client || "-"} — ${numero}`);
     }
 
     resetDevisDraft();
@@ -3858,6 +3915,11 @@ export default function App() {
                           <td style={{ padding: "12px" }}>
                             <div className="actions">
                               <button onClick={() => editDevisLine(line)}>Modifier</button>
+                              {line.sourceStockId && (
+                                <button onClick={() => decreaseStockFromDevisLine(line)}>
+                                  Retirer stock
+                                </button>
+                              )}
                               <button onClick={() => duplicateDevisLine(line)}>Dupliquer</button>
                               <button className="delete" onClick={() => removeDevisLine(line.id)}>Supprimer</button>
                             </div>
@@ -3883,7 +3945,7 @@ export default function App() {
 
               <div className="actions" style={{ marginTop: "16px" }}>
                 <button onClick={() => saveDevis("Archivé")}>
-                  {devisForm.demandeId ? "Valider le devis et le Cahier" : "Valider le devis"}
+                  {devisForm.demandeId ? "Valider devis" : "Valider devis"}
                 </button>
                 <button className="delete" onClick={resetDevisDraft}>Vider devis</button>
               </div>
