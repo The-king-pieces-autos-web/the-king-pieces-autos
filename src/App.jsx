@@ -2786,89 +2786,323 @@ export default function App() {
         {moduleActif === "Devis" && (
           <>
             <section className="stats">
-              <div><span>Demandes cahier</span><strong>{devisRequests.length}</strong></div>
-              <div><span>Devis enregistrés</span><strong>{devis.length}</strong></div>
-              <div><span>Lignes devis en cours</span><strong>{devisLines.length}</strong></div>
-              <div><span>Total TTC en cours</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div>
+              <div><span>Demandes</span><strong>{devisRequests.length}</strong></div>
+              <div><span>Devis</span><strong>{devis.length}</strong></div>
+              <div><span>Devis en cours</span><strong>{devisLines.length}</strong></div>
+              <div><span>Total TTC</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div>
             </section>
 
-            <section className="contentGrid">
-              <div className="panel formPanel">
-                <div className="panelTitle"><span>01</span><div><h3>{editingDevisRequestId ? "Modifier une demande" : "Cahier de demandes devis"}</h3><p>Sur place, téléphone ou WhatsApp. Historique automatique par plaque, VIN, nom ou téléphone.</p></div></div>
-                <form className="form" onSubmit={saveDevisRequest}>
-                  <select name="type" value={devisRequestForm.type} onChange={changeDevisRequestForm}><option>Sur place</option><option>Téléphone</option><option>WhatsApp</option></select>
-                  <select name="statut" value={devisRequestForm.statut} onChange={changeDevisRequestForm}><option>À traiter</option><option>En recherche</option><option>Devis prêt</option><option>Client rappelé</option><option>Réponse WhatsApp envoyée</option><option>Validé</option><option>Refusé</option><option>Archivé</option></select>
-                  <input name="client" value={devisRequestForm.client} onChange={changeDevisRequestForm} placeholder="Nom client / société" />
-                  <input name="telephone" value={devisRequestForm.telephone} onChange={changeDevisRequestForm} placeholder="Téléphone" />
-                  <input name="whatsapp" value={devisRequestForm.whatsapp} onChange={changeDevisRequestForm} placeholder="WhatsApp" />
-                  <select name="clientType" value={devisRequestForm.clientType} onChange={changeDevisRequestForm}><option>Particulier</option><option>Professionnel</option></select>
-                  <input name="plaque" value={devisRequestForm.plaque} onChange={changeDevisRequestForm} placeholder="Plaque immatriculation" />
-                  <input name="vin" value={devisRequestForm.vin} onChange={changeDevisRequestForm} placeholder="VIN / numéro de châssis" />
-                  <input name="marque" value={devisRequestForm.marque} onChange={changeDevisRequestForm} placeholder="Marque" />
-                  <input name="modele" value={devisRequestForm.modele} onChange={changeDevisRequestForm} placeholder="Modèle" />
-                  <input name="prixAnnonce" value={devisRequestForm.prixAnnonce} onChange={changeDevisRequestForm} placeholder="Prix annoncé au client" />
-                  <textarea name="piecesDemandees" value={devisRequestForm.piecesDemandees} onChange={changeDevisRequestForm} placeholder="Pièces demandées par le client" style={{ minHeight: "92px", gridColumn: "1 / -1", border: "1px solid #bfd4ff", borderRadius: "15px", padding: "12px", fontFamily: "inherit" }} />
-                  <textarea name="notesInternes" value={devisRequestForm.notesInternes} onChange={changeDevisRequestForm} placeholder="Notes internes : ancien prix, fournisseur, rappel, attention client..." style={{ minHeight: "92px", gridColumn: "1 / -1", border: "1px solid #bfd4ff", borderRadius: "15px", padding: "12px", fontFamily: "inherit" }} />
-                  <button>{editingDevisRequestId ? "Enregistrer modification demande" : "Ajouter au cahier"}</button>
-                  {editingDevisRequestId && <button type="button" className="delete" onClick={resetDevisRequestForm}>Annuler modification</button>}
-                </form>
+            <section className="panel stockPanel">
+              <div className="panelTitle">
+                <span>01</span>
+                <div>
+                  <h3>{editingDevisRequestId ? "Modifier une demande" : "Nouvelle demande client"}</h3>
+                  <p>Sur place, téléphone ou WhatsApp. Plaque ou VIN permet de retrouver l’historique automatiquement.</p>
+                </div>
               </div>
 
-              <div className="panel familiesPanel">
-                <div className="panelTitle"><span>02</span><div><h3>Historique automatique</h3><p>Quand tu tapes plaque, VIN, nom ou téléphone, les anciennes demandes/devis apparaissent ici.</p></div></div>
-                {matchingDevisHistory.length === 0 && <div className="empty">Aucun historique trouvé pour le moment.</div>}
+              <form className="form" onSubmit={saveDevisRequest}>
+                <select name="type" value={devisRequestForm.type} onChange={changeDevisRequestForm}>
+                  <option>Sur place</option>
+                  <option>Téléphone</option>
+                  <option>WhatsApp</option>
+                </select>
+
+                <select name="statut" value={devisRequestForm.statut} onChange={changeDevisRequestForm}>
+                  <option>À traiter</option>
+                  <option>En recherche</option>
+                  <option>Devis prêt</option>
+                  <option>Client rappelé</option>
+                  <option>Réponse WhatsApp envoyée</option>
+                  <option>Validé</option>
+                  <option>Refusé</option>
+                  <option>Archivé</option>
+                </select>
+
+                <input name="client" value={devisRequestForm.client} onChange={changeDevisRequestForm} placeholder="Nom client / société" />
+                <input name="telephone" value={devisRequestForm.telephone} onChange={changeDevisRequestForm} placeholder="Téléphone" />
+                <input name="whatsapp" value={devisRequestForm.whatsapp} onChange={changeDevisRequestForm} placeholder="WhatsApp" />
+
+                <select name="clientType" value={devisRequestForm.clientType} onChange={changeDevisRequestForm}>
+                  <option>Particulier</option>
+                  <option>Professionnel</option>
+                </select>
+
+                <input name="plaque" value={devisRequestForm.plaque} onChange={changeDevisRequestForm} placeholder="Plaque immatriculation" />
+                <input name="vin" value={devisRequestForm.vin} onChange={changeDevisRequestForm} placeholder="VIN / numéro de châssis" />
+                <input name="marque" value={devisRequestForm.marque} onChange={changeDevisRequestForm} placeholder="Marque" />
+                <input name="modele" value={devisRequestForm.modele} onChange={changeDevisRequestForm} placeholder="Modèle" />
+                <input name="prixAnnonce" value={devisRequestForm.prixAnnonce} onChange={changeDevisRequestForm} placeholder="Prix annoncé si déjà donné" />
+
+                <textarea
+                  name="piecesDemandees"
+                  value={devisRequestForm.piecesDemandees}
+                  onChange={changeDevisRequestForm}
+                  placeholder="Pièces demandées par le client"
+                  style={{ minHeight: "80px", gridColumn: "1 / -1", border: "1px solid #bfd4ff", borderRadius: "15px", padding: "12px", fontFamily: "inherit" }}
+                />
+
+                <textarea
+                  name="notesInternes"
+                  value={devisRequestForm.notesInternes}
+                  onChange={changeDevisRequestForm}
+                  placeholder="Notes internes : fournisseur, rappel, attention prix déjà donné..."
+                  style={{ minHeight: "80px", gridColumn: "1 / -1", border: "1px solid #bfd4ff", borderRadius: "15px", padding: "12px", fontFamily: "inherit" }}
+                />
+
+                <button>{editingDevisRequestId ? "Enregistrer modification" : "Enregistrer demande"}</button>
+
+                {editingDevisRequestId && (
+                  <button type="button" className="delete" onClick={resetDevisRequestForm}>
+                    Annuler modification
+                  </button>
+                )}
+              </form>
+            </section>
+
+            {matchingDevisHistory.length > 0 && (
+              <section className="panel stockPanel">
+                <div className="panelTitle">
+                  <span>02</span>
+                  <div>
+                    <h3>Historique trouvé</h3>
+                    <p>Vérifie les anciens prix avant de répondre au client.</p>
+                  </div>
+                </div>
+
                 <div className="historyList">
                   {matchingDevisHistory.map((item) => (
                     <div className="historyItem" key={`${item.sourceType}-${item.id}`}>
                       <strong>{item.sourceType} — {item.client || "-"}</strong>
                       <p>Plaque : {item.plaque || "-"} — VIN : {item.vin || "-"}</p>
-                      <p>Véhicule : {item.marque || "-"} {item.modele || ""}</p>
-                      <span>Prix : {item.prixAnnonce || item.totalTTC || "-"} € — Salarié : {item.createdByName || item.createdBy || "-"} — Statut : {item.statut || item.status || "-"}</span>
+                      <p>{item.marque || "-"} {item.modele || ""}</p>
+                      <span>
+                        Prix : {item.prixAnnonce || item.totalTTC || "-"} €
+                        — Salarié : {item.createdByName || item.createdBy || "-"}
+                        — Statut : {item.statut || item.status || "-"}
+                      </span>
+
                       <div className="actions" style={{ marginTop: "10px" }}>
-                        {item.sourceType === "Demande" ? <><button onClick={() => setSelectedDevisRequest(item)}>Afficher</button><button onClick={() => editDevisRequest(item)}>Modifier</button><button onClick={() => createDevisFromRequest(item)}>Créer devis</button></> : <><button onClick={() => setSelectedDevis(item)}>Afficher devis</button><button onClick={() => editDevis(item)}>Modifier devis</button><button onClick={() => printDevis(item)}>Imprimer devis</button></>}
+                        {item.sourceType === "Demande" ? (
+                          <>
+                            <button onClick={() => setSelectedDevisRequest(item)}>Afficher</button>
+                            <button onClick={() => editDevisRequest(item)}>Modifier</button>
+                            <button onClick={() => createDevisFromRequest(item)}>Créer devis</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => setSelectedDevis(item)}>Afficher devis</button>
+                            <button onClick={() => editDevis(item)}>Modifier devis</button>
+                            <button onClick={() => printDevis(item)}>Imprimer devis</button>
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
-              </div>
-            </section>
+              </section>
+            )}
 
             <section className="panel stockPanel">
-              <div className="panelTitle"><span>03</span><div><h3>Cahiers partagés</h3><p>Chaque compte a son cahier, mais tout le monde peut rechercher les demandes des collègues. Admin voit tout.</p></div></div>
-              <section className="searchLine" style={{ marginBottom: "14px" }}><span>🔎</span><input value={devisRequestSearch} onChange={(e) => setDevisRequestSearch(e.target.value)} placeholder="Recherche : plaque, VIN, nom client, téléphone, salarié, pièce..." /></section>
-              <div className="form" style={{ marginBottom: "16px" }}>
-                <select value={devisRequestTypeFilter} onChange={(e) => setDevisRequestTypeFilter(e.target.value)}><option>Tous</option><option>Sur place</option><option>Téléphone</option><option>WhatsApp</option></select>
-                <select value={devisRequestUserFilter} onChange={(e) => setDevisRequestUserFilter(e.target.value)}>{devisRequestUsers.map((name) => <option key={name}>{name}</option>)}</select>
+              <div className="panelTitle">
+                <span>03</span>
+                <div>
+                  <h3>Liste des demandes</h3>
+                  <p>Recherche par nom, téléphone, plaque, VIN, salarié ou pièce.</p>
+                </div>
               </div>
+
+              <section className="searchLine" style={{ marginBottom: "14px" }}>
+                <span>🔎</span>
+                <input
+                  value={devisRequestSearch}
+                  onChange={(e) => setDevisRequestSearch(e.target.value)}
+                  placeholder="Recherche : plaque, VIN, nom client, téléphone, pièce..."
+                />
+              </section>
+
+              <div className="form" style={{ marginBottom: "16px" }}>
+                <select value={devisRequestTypeFilter} onChange={(e) => setDevisRequestTypeFilter(e.target.value)}>
+                  <option>Tous</option>
+                  <option>Sur place</option>
+                  <option>Téléphone</option>
+                  <option>WhatsApp</option>
+                </select>
+
+                <select value={devisRequestUserFilter} onChange={(e) => setDevisRequestUserFilter(e.target.value)}>
+                  {devisRequestUsers.map((name) => (
+                    <option key={name}>{name}</option>
+                  ))}
+                </select>
+              </div>
+
               {filteredDevisRequests.length === 0 && <div className="empty">Aucune demande trouvée.</div>}
+
               <div className="historyList">
                 {filteredDevisRequests.map((request) => {
                   const isOwner = request.createdByLogin === currentUser?.login;
-                  return <div className="historyItem clickable" key={request.id} onClick={() => setSelectedDevisRequest(request)} style={{ border: isOwner ? "2px solid #123f8f" : undefined }}>
-                    <strong>{request.type} — {request.client || "Client sans nom"}</strong>
-                    <p>Plaque : {request.plaque || "-"} — VIN : {request.vin || "-"}</p><p>Pièces : {String(request.piecesDemandees || "-").slice(0, 140)}</p>
-                    <span>Statut : {request.statut} — Salarié : {request.createdByName || "-"} — {request.createdAt}</span>
-                    <div className="actions" style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => setSelectedDevisRequest(request)}>Afficher</button><button onClick={() => editDevisRequest(request)}>Modifier</button><button onClick={() => printDevisRequest(request)}>Imprimer</button><button onClick={() => createDevisFromRequest(request)}>Créer devis</button>
-                      <select value={request.statut || "À traiter"} onChange={(e) => changeDevisRequestStatus(request.id, e.target.value)} style={{ height: "40px", borderRadius: "12px", border: "1px solid #bfd4ff", padding: "0 8px" }}><option>À traiter</option><option>En recherche</option><option>Devis prêt</option><option>Client rappelé</option><option>Réponse WhatsApp envoyée</option><option>Validé</option><option>Refusé</option><option>Archivé</option></select>
-                      <button className="delete" onClick={() => deleteDevisRequest(request.id)}>Supprimer</button>
+                  return (
+                    <div
+                      className="historyItem clickable"
+                      key={request.id}
+                      onClick={() => setSelectedDevisRequest(request)}
+                      style={{ border: isOwner ? "2px solid #123f8f" : undefined }}
+                    >
+                      <strong>{request.type} — {request.client || "Client sans nom"}</strong>
+                      <p>Plaque : {request.plaque || "-"} — VIN : {request.vin || "-"}</p>
+                      <p>Pièces : {String(request.piecesDemandees || "-").slice(0, 140)}</p>
+                      <span>Statut : {request.statut} — Salarié : {request.createdByName || "-"} — {request.createdAt}</span>
+
+                      <div className="actions" style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => setSelectedDevisRequest(request)}>Afficher</button>
+                        <button onClick={() => editDevisRequest(request)}>Modifier</button>
+                        <button onClick={() => printDevisRequest(request)}>Imprimer</button>
+                        <button onClick={() => createDevisFromRequest(request)}>Créer devis</button>
+                        <select
+                          value={request.statut || "À traiter"}
+                          onChange={(e) => changeDevisRequestStatus(request.id, e.target.value)}
+                          style={{ height: "40px", borderRadius: "12px", border: "1px solid #bfd4ff", padding: "0 8px" }}
+                        >
+                          <option>À traiter</option>
+                          <option>En recherche</option>
+                          <option>Devis prêt</option>
+                          <option>Client rappelé</option>
+                          <option>Réponse WhatsApp envoyée</option>
+                          <option>Validé</option>
+                          <option>Refusé</option>
+                          <option>Archivé</option>
+                        </select>
+                        <button className="delete" onClick={() => deleteDevisRequest(request.id)}>Supprimer</button>
+                      </div>
                     </div>
-                  </div>;
+                  );
                 })}
               </div>
             </section>
 
-            <section className="panel stockPanel"><div className="panelTitle"><span>04</span><div><h3>{editingDevisId ? "Modifier le devis final" : "Créer un devis final"}</h3><p>Les références sont visibles ici mais jamais sur l’impression client.</p></div></div>
-              <form className="form"><input name="numero" value={devisForm.numero || nextDevisNumero()} onChange={changeDevisForm} placeholder="Numéro devis" /><input name="client" value={devisForm.client} onChange={changeDevisForm} placeholder="Nom client" /><input name="telephone" value={devisForm.telephone || ""} onChange={changeDevisForm} placeholder="Téléphone / WhatsApp" /><input name="date" type="date" value={devisForm.date} onChange={changeDevisForm} /><input name="marque" value={devisForm.marque} onChange={changeDevisForm} placeholder="Marque voiture" /><input name="modele" value={devisForm.modele} onChange={changeDevisForm} placeholder="Modèle voiture" /><input name="plaque" value={devisForm.plaque} onChange={changeDevisForm} placeholder="Immatriculation" /><input name="vin" value={devisForm.vin || ""} onChange={changeDevisForm} placeholder="VIN / numéro de châssis" /><input name="origineDemande" value={devisForm.origineDemande || ""} onChange={changeDevisForm} placeholder="Origine demande" /><select name="remiseType" value={devisForm.remiseType} onChange={changeDevisForm}><option value="pourcentage">Remise en %</option><option value="montant">Remise en €</option></select><input name="remiseValue" value={devisForm.remiseValue} onChange={changeDevisForm} placeholder="Valeur remise" /></form>
+            <section className="panel stockPanel">
+              <div className="panelTitle">
+                <span>04</span>
+                <div>
+                  <h3>{editingDevisId ? "Modifier le devis final" : "Devis final"}</h3>
+                  <p>Créer le devis final depuis une demande ou manuellement.</p>
+                </div>
+              </div>
+
+              <form className="form">
+                <input name="numero" value={devisForm.numero || nextDevisNumero()} onChange={changeDevisForm} placeholder="Numéro devis" />
+                <input name="client" value={devisForm.client} onChange={changeDevisForm} placeholder="Nom client" />
+                <input name="telephone" value={devisForm.telephone || ""} onChange={changeDevisForm} placeholder="Téléphone / WhatsApp" />
+                <input name="date" type="date" value={devisForm.date} onChange={changeDevisForm} />
+                <input name="marque" value={devisForm.marque} onChange={changeDevisForm} placeholder="Marque voiture" />
+                <input name="modele" value={devisForm.modele} onChange={changeDevisForm} placeholder="Modèle voiture" />
+                <input name="plaque" value={devisForm.plaque} onChange={changeDevisForm} placeholder="Immatriculation" />
+                <input name="vin" value={devisForm.vin || ""} onChange={changeDevisForm} placeholder="VIN / numéro de châssis" />
+
+                <select name="remiseType" value={devisForm.remiseType} onChange={changeDevisForm}>
+                  <option value="pourcentage">Remise en %</option>
+                  <option value="montant">Remise en €</option>
+                </select>
+
+                <input name="remiseValue" value={devisForm.remiseValue} onChange={changeDevisForm} placeholder="Valeur remise" />
+              </form>
+
+              <div className="panel" style={{ marginTop: "18px", boxShadow: "none" }}>
+                <div className="panelTitle">
+                  <span>+</span>
+                  <div>
+                    <h3>{editingDevisLineId ? "Modifier une pièce" : "Ajouter une pièce"}</h3>
+                    <p>Référence visible dans le logiciel, cachée sur l’impression client.</p>
+                  </div>
+                </div>
+
+                <form className="form" onSubmit={addManualLineToDevis}>
+                  <input name="designation" value={devisLine.designation} onChange={changeDevisLine} placeholder="Désignation pièce" />
+                  <input name="reference" value={devisLine.reference} onChange={changeDevisLine} placeholder="Référence interne" />
+                  <input name="quantite" value={devisLine.quantite} onChange={changeDevisLine} placeholder="Quantité" />
+                  <input name="prixTTC" value={devisLine.prixTTC} onChange={changeDevisLine} placeholder="Prix TTC" />
+                  <button>{editingDevisLineId ? "Enregistrer modification" : "Ajouter au devis"}</button>
+                  {editingDevisLineId && <button type="button" onClick={cancelEditDevisLine}>Annuler</button>}
+                </form>
+              </div>
+
+              {devisLines.length > 0 && (
+                <div style={{ overflowX: "auto", marginTop: "18px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: "18px", overflow: "hidden", border: "1px solid rgba(191, 212, 255, 0.85)" }}>
+                    <thead>
+                      <tr style={{ background: "#123f8f", color: "white" }}>
+                        <th style={{ padding: "12px", textAlign: "left" }}>N°</th>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Désignation</th>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Référence interne</th>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Qté</th>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Prix TTC</th>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Total</th>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {devisLines.map((line, index) => (
+                        <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2", background: editingDevisLineId === line.id ? "#eaf1ff" : "white" }}>
+                          <td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td>
+                          <td style={{ padding: "12px" }}>{line.designation}</td>
+                          <td style={{ padding: "12px" }}>{line.reference || "-"}</td>
+                          <td style={{ padding: "12px" }}>{line.quantite}</td>
+                          <td style={{ padding: "12px" }}>{Number(line.prixTTC).toFixed(2)} €</td>
+                          <td style={{ padding: "12px", fontWeight: "900" }}>{(Number(line.quantite) * Number(line.prixTTC)).toFixed(2)} €</td>
+                          <td style={{ padding: "12px" }}>
+                            <div className="actions">
+                              <button onClick={() => editDevisLine(line)}>Modifier</button>
+                              <button onClick={() => duplicateDevisLine(line)}>Dupliquer</button>
+                              <button className="delete" onClick={() => removeDevisLine(line.id)}>Supprimer</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <section className="stats">
+                <div><span>Sous-total HT</span><strong>{devisTotals.sousTotalHT.toFixed(2)} €</strong></div>
+                <div><span>Remise HT</span><strong>{devisTotals.remiseHT.toFixed(2)} €</strong></div>
+                <div><span>TVA 20%</span><strong>{devisTotals.tva.toFixed(2)} €</strong></div>
+                <div><span>Total TTC</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div>
+              </section>
+
+              <div className="actions" style={{ marginTop: "16px" }}>
+                <button onClick={() => saveDevis("Brouillon")}>{editingDevisId ? "Enregistrer modification devis" : "Enregistrer devis"}</button>
+                <button onClick={() => saveDevis("Archivé")}>Valider / Archiver</button>
+                <button className="delete" onClick={resetDevisDraft}>Vider devis</button>
+              </div>
             </section>
 
-            <section className="panel stockPanel"><div className="panelTitle"><span>05</span><div><h3>{editingDevisLineId ? "Modifier une pièce du devis" : "Ajouter une pièce au devis"}</h3><p>Ajoute, modifie ou supprime une seule ligne sans vider tout le devis.</p></div></div>
-              <form className="form" onSubmit={addManualLineToDevis}><input name="designation" value={devisLine.designation} onChange={changeDevisLine} placeholder="Désignation pièce" /><input name="reference" value={devisLine.reference} onChange={changeDevisLine} placeholder="Référence interne" /><input name="quantite" value={devisLine.quantite} onChange={changeDevisLine} placeholder="Quantité" /><input name="prixTTC" value={devisLine.prixTTC} onChange={changeDevisLine} placeholder="Prix TTC" /><button>{editingDevisLineId ? "Enregistrer modification ligne" : "Ajouter au devis"}</button>{editingDevisLineId && <button type="button" onClick={cancelEditDevisLine}>Annuler modification</button>}</form>
+            <section className="panel stockPanel">
+              <div className="panelTitle">
+                <span>05</span>
+                <div>
+                  <h3>Devis enregistrés</h3>
+                  <p>Modifier, supprimer ou imprimer à tout moment.</p>
+                </div>
+              </div>
+
+              {devis.length === 0 && <div className="empty">Aucun devis enregistré.</div>}
+
+              <div className="historyList">
+                {devis.map((d) => (
+                  <div className="historyItem clickable" key={d.id} onClick={() => setSelectedDevis(d)}>
+                    <strong>{d.numero} — {d.client}</strong>
+                    <p>{d.marque} {d.modele} — Plaque : {d.plaque || "-"} — VIN : {d.vin || "-"}</p>
+                    <span>{d.status} — TTC : {Number(d.totalTTC).toFixed(2)} € — {d.createdAt}</span>
+                    <div className="actions" style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => printDevis(d)}>Imprimer</button>
+                      <button onClick={() => editDevis(d)}>Modifier</button>
+                      <button className="delete" onClick={() => deleteDevis(d.id)}>Supprimer</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </section>
-
-            <section className="panel stockPanel"><div className="panelTitle"><span>06</span><div><h3>Pièces du devis final</h3><p>Les lignes sont groupées dans le même devis.</p></div></div>{devisLines.length === 0 && <div className="empty">Aucune pièce dans le devis.</div>}{devisLines.length > 0 && <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: "18px", overflow: "hidden", border: "1px solid rgba(191, 212, 255, 0.85)" }}><thead><tr style={{ background: "#123f8f", color: "white" }}><th style={{ padding: "12px", textAlign: "left" }}>N°</th><th style={{ padding: "12px", textAlign: "left" }}>Désignation</th><th style={{ padding: "12px", textAlign: "left" }}>Référence interne</th><th style={{ padding: "12px", textAlign: "left" }}>Qté</th><th style={{ padding: "12px", textAlign: "left" }}>Prix TTC</th><th style={{ padding: "12px", textAlign: "left" }}>Total TTC</th><th style={{ padding: "12px", textAlign: "left" }}>Actions</th></tr></thead><tbody>{devisLines.map((line, index) => <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2", background: editingDevisLineId === line.id ? "#eaf1ff" : "white" }}><td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td><td style={{ padding: "12px" }}><input value={line.designation} onChange={(e) => updateDevisLine(line.id, "designation", e.target.value)} style={{ width: "100%", border: "1px solid #bfd4ff", borderRadius: "10px", height: "38px", padding: "0 10px" }} /></td><td style={{ padding: "12px" }}><input value={line.reference || ""} onChange={(e) => updateDevisLine(line.id, "reference", e.target.value)} style={{ width: "100%", border: "1px solid #bfd4ff", borderRadius: "10px", height: "38px", padding: "0 10px" }} /></td><td style={{ padding: "12px", width: "90px" }}><input value={line.quantite} onChange={(e) => updateDevisLine(line.id, "quantite", e.target.value)} style={{ width: "80px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "38px", padding: "0 10px" }} /></td><td style={{ padding: "12px", width: "120px" }}><input value={line.prixTTC} onChange={(e) => updateDevisLine(line.id, "prixTTC", e.target.value)} style={{ width: "110px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "38px", padding: "0 10px" }} /></td><td style={{ padding: "12px", fontWeight: "900", color: "#08275f" }}>{(Number(line.quantite) * Number(line.prixTTC)).toFixed(2)} €</td><td style={{ padding: "12px" }}><div className="actions"><button onClick={() => editDevisLine(line)}>Modifier</button><button onClick={() => duplicateDevisLine(line)}>Dupliquer</button><button className="delete" onClick={() => removeDevisLine(line.id)}>Supprimer</button></div></td></tr>)}</tbody></table></div>}<section className="stats"><div><span>Sous-total HT</span><strong>{devisTotals.sousTotalHT.toFixed(2)} €</strong></div><div><span>Remise HT</span><strong>{devisTotals.remiseHT.toFixed(2)} €</strong></div><div><span>TVA 20%</span><strong>{devisTotals.tva.toFixed(2)} €</strong></div><div><span>Total TTC</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div></section><div className="actions" style={{ marginTop: "16px" }}><button onClick={() => saveDevis("Brouillon")}>{editingDevisId ? "Enregistrer modification devis" : "Enregistrer devis"}</button><button onClick={() => saveDevis("Archivé")}>Valider / Archiver</button><button className="delete" onClick={resetDevisDraft}>Vider devis</button></div></section>
-
-            <section className="panel stockPanel"><div className="panelTitle"><span>07</span><div><h3>Devis enregistrés</h3><p>Modifiables, supprimables et imprimables à tout moment.</p></div></div>{devis.length === 0 && <div className="empty">Aucun devis enregistré.</div>}<div className="historyList">{devis.map((d) => <div className="historyItem clickable" key={d.id} onClick={() => setSelectedDevis(d)}><strong>{d.numero} — {d.client}</strong><p>{d.marque} {d.modele} — Plaque : {d.plaque || "-"} — VIN : {d.vin || "-"}</p><span>{d.status} — TTC : {Number(d.totalTTC).toFixed(2)} € — {d.createdAt}</span><div className="actions" style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}><button onClick={() => printDevis(d)}>Imprimer</button><button onClick={() => editDevis(d)}>Modifier</button><button className="delete" onClick={() => deleteDevis(d.id)}>Supprimer</button></div></div>)}</div></section>
           </>
         )}
 
