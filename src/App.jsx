@@ -188,6 +188,8 @@ export default function App() {
   const [selectedDevisRequest, setSelectedDevisRequest] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedClientArchive, setSelectedClientArchive] = useState(null);
+  const [devisStockSearchLineId, setDevisStockSearchLineId] = useState(null);
+  const [devisStockSearchText, setDevisStockSearchText] = useState("");
 
   const [orderArchivePeriod, setOrderArchivePeriod] = useState({ debut: "", fin: "" });
   const [devisStockSelection, setDevisStockSelection] = useState([]);
@@ -1400,6 +1402,59 @@ export default function App() {
     win.document.close();
 
     addHistory("Impression demande devis", `${request.client || "-"} — ${request.plaque || request.vin || "-"}`);
+  }
+
+  function openStockSearchForDevisLine(line) {
+    setDevisStockSearchLineId(line.id);
+    setDevisStockSearchText(line.reference || line.designation || "");
+  }
+
+  function closeStockSearchForDevisLine() {
+    setDevisStockSearchLineId(null);
+    setDevisStockSearchText("");
+  }
+
+  function getStockSearchResultsForDevisLine() {
+    const q = normalizeTextForMatch(devisStockSearchText);
+    if (!q) return [];
+
+    return pieces
+      .filter((piece) => {
+        const text = normalizeTextForMatch(
+          `${piece.designation} ${piece.refInterne} ${piece.refOrigine} ${piece.famille} ${piece.sousFamille} ${piece.fournisseur}`
+        );
+        return text.includes(q);
+      })
+      .slice(0, 12);
+  }
+
+  function applyStockPieceToDevisLine(lineId, piece, priceType) {
+    const prixChoisi =
+      priceType === "pro"
+        ? Number(piece.prixPro || piece.prixPart || 0)
+        : Number(piece.prixPart || piece.prixPro || 0);
+
+    setDevisLines((prev) =>
+      prev.map((line) =>
+        line.id === lineId
+          ? {
+              ...line,
+              reference: piece.refInterne || piece.refOrigine || "",
+              prixTTC: prixChoisi,
+              priceType,
+              sourceStockId: piece.id,
+              stockDesignation: piece.designation,
+            }
+          : line
+      )
+    );
+
+    addHistory(
+      "Pièce stock sélectionnée dans devis",
+      `${piece.designation} — tarif ${priceType === "pro" ? "professionnel" : "particulier"}`
+    );
+
+    closeStockSearchForDevisLine();
   }
 
   function changeDevisForm(e) {
@@ -3324,7 +3379,7 @@ export default function App() {
                 <span>01</span>
                 <div>
                   <h3>{editingDevisId ? "Modifier le devis final" : "Devis final"}</h3>
-                  <p>Ouvre une demande depuis le Cahier : toutes les pièces demandées arrivent ici, tu complètes référence et prix.</p>
+                  <p>Ouvre une demande depuis le Cahier : toutes les pièces demandées arrivent ici. Clique dans la référence pour chercher directement dans le stock et choisir prix particulier/pro.</p>
                 </div>
               </div>
 
@@ -3412,10 +3467,65 @@ export default function App() {
                         <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2", background: editingDevisLineId === line.id ? "#eaf1ff" : "white" }}>
                           <td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td>
                           <td style={{ padding: "12px" }}>{line.designation}</td>
-                          <td style={{ padding: "12px" }}>
-                            <input value={line.reference || ""} onChange={(e) => updateDevisLine(line.id, "reference", e.target.value)} placeholder="Réf. offre 1" style={{ width: "130px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }} />
+                          <td style={{ padding: "12px", minWidth: "260px" }}>
+                            <input
+                              value={line.reference || ""}
+                              onFocus={() => openStockSearchForDevisLine(line)}
+                              onChange={(e) => {
+                                updateDevisLine(line.id, "reference", e.target.value);
+                                setDevisStockSearchLineId(line.id);
+                                setDevisStockSearchText(e.target.value || line.designation || "");
+                              }}
+                              placeholder="Clique ici pour chercher dans le stock"
+                              style={{ width: "210px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }}
+                            />
+
+                            {devisStockSearchLineId === line.id && (
+                              <div
+                                style={{
+                                  marginTop: "10px",
+                                  padding: "10px",
+                                  border: "1px solid #bfd4ff",
+                                  borderRadius: "14px",
+                                  background: "#f8fbff",
+                                  minWidth: "360px",
+                                }}
+                              >
+                                <div className="form" style={{ gridTemplateColumns: "1fr auto", marginBottom: "10px" }}>
+                                  <input
+                                    value={devisStockSearchText}
+                                    onChange={(e) => setDevisStockSearchText(e.target.value)}
+                                    placeholder="Recherche stock : référence, nom, famille..."
+                                  />
+                                  <button type="button" className="delete" onClick={closeStockSearchForDevisLine}>Fermer</button>
+                                </div>
+
+                                {getStockSearchResultsForDevisLine().length === 0 && (
+                                  <div className="empty">Aucune pièce trouvée dans le stock.</div>
+                                )}
+
+                                <div className="historyList">
+                                  {getStockSearchResultsForDevisLine().map((piece) => (
+                                    <div className="historyItem" key={piece.id}>
+                                      <strong>{piece.designation}</strong>
+                                      <p>Réf interne : {piece.refInterne || "-"} — Réf origine : {piece.refOrigine || "-"}</p>
+                                      <p>Stock : {piece.quantite} — Particulier : {piece.prixPart || 0} € — Pro : {piece.prixPro || 0} €</p>
+                                      <div className="actions" style={{ marginTop: "8px" }}>
+                                        <button type="button" onClick={() => applyStockPieceToDevisLine(line.id, piece, "particulier")}>
+                                          Choisir prix particulier
+                                        </button>
+                                        <button type="button" onClick={() => applyStockPieceToDevisLine(line.id, piece, "pro")}>
+                                          Choisir prix professionnel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
                             {line.deuxOffres && (
-                              <input value={line.reference2 || ""} onChange={(e) => updateDevisLine(line.id, "reference2", e.target.value)} placeholder="Réf. offre 2" style={{ width: "130px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px", marginTop: "6px" }} />
+                              <input value={line.reference2 || ""} onChange={(e) => updateDevisLine(line.id, "reference2", e.target.value)} placeholder="Réf. offre 2" style={{ width: "210px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px", marginTop: "6px" }} />
                             )}
                           </td>
                           <td style={{ padding: "12px" }}>
@@ -3468,8 +3578,9 @@ export default function App() {
               </section>
 
               <div className="actions" style={{ marginTop: "16px" }}>
-                <button onClick={() => saveDevis("Brouillon")}>{devisForm.demandeId ? "Enregistrer dans la demande Cahier" : editingDevisId ? "Enregistrer modification devis" : "Enregistrer devis"}</button>
-                <button onClick={() => saveDevis("Archivé")}>{devisForm.demandeId ? "Valider et enregistrer dans Cahier" : "Valider / Archiver"}</button>
+                <button onClick={() => saveDevis("Archivé")}>
+                  {devisForm.demandeId ? "Valider le devis dans le Cahier" : "Valider le devis"}
+                </button>
                 <button className="delete" onClick={resetDevisDraft}>Vider devis</button>
               </div>
             </section>
