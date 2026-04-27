@@ -415,29 +415,36 @@ export default function App() {
   }
 
     function appCahierToDb(request) {
+    const id = String(request.id || Date.now());
+    const piecesArray = parseRequestedPieces(request.piecesDemandees || "").map((designation, index) => ({
+      id: index + 1,
+      nom: designation,
+      designation,
+    }));
+
     return {
-      id: typeof request.id === "number" ? request.id : Date.now(),
+      id,
+      legacy_id: request.legacyId || null,
       cahier_numero: request.cahierNumero || `CH-${Date.now()}`,
       client: request.client || "",
       telephone: request.telephone || "",
+      whatsapp: request.whatsapp || "",
       canal: request.type || "Sur place",
+      type_demande: request.type || "Sur place",
+      client_type: request.clientType || "Particulier",
       plaque: request.plaque || "",
       vin: request.vin || "",
       marque: request.marque || "",
       modele: request.modele || "",
-      pieces: parseRequestedPieces(request.piecesDemandees || "").map((designation, index) => ({
-        id: index + 1,
-        nom: designation,
-        designation,
-      })),
-      pieces_demandees: parseRequestedPieces(request.piecesDemandees || "").map((designation, index) => ({
-        id: index + 1,
-        nom: designation,
-        designation,
-      })),
+      pieces: piecesArray,
+      pieces_demandees: piecesArray,
+      devis_lignes: request.devisLignes || [],
       notes: request.notesInternes || "",
+      notes_internes: request.notesInternes || "",
       demande_complete: request.notesInternes || "",
       statut: request.statut || "En attente",
+      devis_numero: request.devisNumero || "",
+      total_ttc: Number(request.devisTotalTTC || 0),
       created_by_login: request.createdByLogin || currentUser?.login || "",
       created_by_name: request.createdByName || currentUser?.name || "",
       created_at: request.createdAt || new Date().toISOString(),
@@ -485,19 +492,29 @@ export default function App() {
 
     function appDevisToDb(devisItem) {
     return {
-      id: typeof devisItem.id === "number" ? devisItem.id : Date.now(),
+      id: String(devisItem.id || Date.now()),
+      legacy_id: devisItem.legacyId || null,
       devis_numero: devisItem.numero || nextDevisNumero(),
-      cahier_demande_id: devisItem.demandeId || devisItem.cahierDemandeId || null,
+      cahier_demande_id: devisItem.demandeId || devisItem.cahierDemandeId ? String(devisItem.demandeId || devisItem.cahierDemandeId) : null,
       client: devisItem.client || "",
+      telephone: devisItem.telephone || "",
+      date_devis: devisItem.date || new Date().toISOString().slice(0, 10),
+      marque: devisItem.marque || "",
+      modele: devisItem.modele || "",
       plaque: devisItem.plaque || "",
       vin: devisItem.vin || "",
+      origine_demande: devisItem.origineDemande || "",
       lignes: devisItem.lignes || [],
+      lignes_completes_cahier: devisItem.lignesCompletesCahier || devisItem.lignes || [],
       total_ttc: Number(devisItem.totalTTC || 0),
       total_toutes_pieces_ttc: Number(devisItem.totalToutesPiecesTTC || devisItem.totalTTC || 0),
       total_valide_client_ttc: Number(devisItem.totalValideClientTTC || devisItem.totalTTC || 0),
       statut: devisItem.status || "Archivé",
+      created_by: devisItem.createdBy || currentUser?.name || "",
+      updated_by: currentUser?.name || currentUser?.login || "system",
       created_at: devisItem.createdAt || new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      is_active: true,
     };
   }
 
@@ -530,68 +547,81 @@ export default function App() {
   }
 
   async function insertCahierInDb(request) {
-    const { data, error } = await supabase
+    const payload = appCahierToDb(request);
+
+    const { error } = await supabase
       .from("cahier_demandes")
-      .insert(appCahierToDb(request))
-      .select("*")
-      .single();
+      .insert([payload]);
 
     if (error) {
-      console.error("Supabase cahier_demandes error:", error);
+      console.error("Supabase cahier_demandes INSERT error:", error);
       throw error;
     }
-    return dbCahierToApp(data);
+
+    return dbCahierToApp(payload);
   }
 
-  async function updateCahierInDb(id, request) {
-    const { data, error } = await supabase
+    async function updateCahierInDb(id, request) {
+    const payload = appCahierToDb({ ...request, id });
+
+    const { error } = await supabase
       .from("cahier_demandes")
-      .update(appCahierToDb(request))
-      .eq("id", id)
-      .select("*")
-      .single();
+      .update(payload)
+      .eq("id", String(id));
 
-    if (error) throw error;
-    return dbCahierToApp(data);
+    if (error) {
+      console.error("Supabase cahier_demandes UPDATE error:", error);
+      throw error;
+    }
+
+    return dbCahierToApp(payload);
   }
 
-  async function deleteCahierInDb(id) {
+    async function deleteCahierInDb(id) {
     const { error } = await supabase
       .from("cahier_demandes")
       .delete()
-      .eq("id", id);
+      .eq("id", String(id));
 
     if (error) throw error;
   }
 
   async function insertDevisInDb(devisItem) {
-    const { data, error } = await supabase
-      .from("devis")
-      .insert(appDevisToDb(devisItem))
-      .select("*")
-      .single();
+    const payload = appDevisToDb(devisItem);
 
-    if (error) throw error;
-    return dbDevisToApp(data);
+    const { error } = await supabase
+      .from("devis")
+      .insert([payload]);
+
+    if (error) {
+      console.error("Supabase devis INSERT error:", error);
+      throw error;
+    }
+
+    return dbDevisToApp(payload);
   }
 
-  async function updateDevisInDb(id, devisItem) {
-    const { data, error } = await supabase
-      .from("devis")
-      .update(appDevisToDb(devisItem))
-      .eq("id", id)
-      .select("*")
-      .single();
+    async function updateDevisInDb(id, devisItem) {
+    const payload = appDevisToDb({ ...devisItem, id });
 
-    if (error) throw error;
-    return dbDevisToApp(data);
+    const { error } = await supabase
+      .from("devis")
+      .update(payload)
+      .eq("id", String(id));
+
+    if (error) {
+      console.error("Supabase devis UPDATE error:", error);
+      throw error;
+    }
+
+    return dbDevisToApp(payload);
   }
 
-  async function deleteDevisInDb(id) {
+    async function deleteDevisInDb(id) {
     const { error } = await supabase
       .from("devis")
       .delete()
-      .eq("id", id);
+      .eq("id", String(id));
 
     if (error) throw error;
   }
@@ -1627,7 +1657,7 @@ export default function App() {
     const cahierNumero = old?.cahierNumero || await nextCahierNumeroFromDb();
 
     const requestPayload = {
-      id: editingDevisRequestId || Date.now(),
+      id: editingDevisRequestId || String(Date.now()),
       cahierNumero,
       ...devisRequestForm,
       statut: devisRequestForm.statut || "En attente",
@@ -1662,7 +1692,7 @@ export default function App() {
       alert("Demande Cahier enregistrée.");
     } catch (error) {
       console.error("Erreur cahier_demandes", error);
-      alert("Erreur Supabase : impossible d'enregistrer la demande Cahier. Vérifie la table cahier_demandes.");
+      alert("Erreur Supabase : impossible d'enregistrer la demande Cahier. Détail : " + (error?.message || "voir console"));
     }
   }
 
