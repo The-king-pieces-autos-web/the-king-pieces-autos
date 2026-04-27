@@ -190,6 +190,9 @@ export default function App() {
   const [selectedClientArchive, setSelectedClientArchive] = useState(null);
   const [devisStockSearchLineId, setDevisStockSearchLineId] = useState(null);
   const [devisStockSearchText, setDevisStockSearchText] = useState("");
+  const [devisSoldSelection, setDevisSoldSelection] = useState({});
+  const [devisArchiveDate, setDevisArchiveDate] = useState(new Date().toISOString().slice(0, 10));
+  const [devisArchiveMonth, setDevisArchiveMonth] = useState(new Date().toISOString().slice(0, 7));
 
   const [orderArchivePeriod, setOrderArchivePeriod] = useState({ debut: "", fin: "" });
   const [devisStockSelection, setDevisStockSelection] = useState([]);
@@ -616,7 +619,24 @@ export default function App() {
   }, [devisLines, devisForm.remiseType, devisForm.remiseValue]);
 
   function nextDevisNumero() {
-    return `DV-${String(devis.length + 1).padStart(5, "0")}`;
+    const year = new Date().getFullYear();
+    const allNumbers = [
+      ...devis.map((d) => d.numero),
+      ...devisRequests.map((r) => r.devisNumero || r.devis?.numero),
+    ].filter(Boolean);
+
+    const currentYearNumbers = allNumbers
+      .map((numero) => String(numero || ""))
+      .filter((numero) => numero.includes(`-${year}-`))
+      .map((numero) => {
+        const lastPart = numero.split("-").pop();
+        return Number(lastPart || 0);
+      })
+      .filter((n) => !Number.isNaN(n));
+
+    const nextNumber = currentYearNumbers.length ? Math.max(...currentYearNumbers) + 1 : 1;
+
+    return `DV-${year}-${String(nextNumber).padStart(5, "0")}`;
   }
 
   function addHistory(action, details) {
@@ -1455,6 +1475,205 @@ export default function App() {
     );
 
     closeStockSearchForDevisLine();
+  }
+
+  function getAllSavedDevisForArchives() {
+    const cahierDevis = devisRequests
+      .filter((request) => request.devis)
+      .map((request) => ({
+        ...request.devis,
+        fromCahier: true,
+        cahierRequestId: request.id,
+        cahierClient: request.client,
+        cahierStatut: request.statut,
+        createdAt: request.devis?.createdAt || request.updatedAt || request.createdAt,
+        updatedAt: request.updatedAt,
+      }));
+
+    return [...devis, ...cahierDevis].sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+  }
+
+  function getDevisArchiveByDate(dateValue) {
+    if (!dateValue) return [];
+
+    return getAllSavedDevisForArchives().filter((d) => {
+      const dDate = d.date || "";
+      const created = String(d.createdAt || "");
+      return dDate === dateValue || created.includes(new Date(dateValue).toLocaleDateString("fr-FR"));
+    });
+  }
+
+  function getDevisArchiveByMonth(monthValue) {
+    if (!monthValue) return [];
+
+    return getAllSavedDevisForArchives().filter((d) => {
+      const dDate = d.date || "";
+      return dDate.startsWith(monthValue);
+    });
+  }
+
+  function toggleDevisSoldLine(lineId) {
+    setDevisSoldSelection((prev) => ({
+      ...prev,
+      [lineId]: !prev[lineId],
+    }));
+  }
+
+  function selectAllStockLinesForSale() {
+    const next = {};
+    devisLines.forEach((line) => {
+      if (line.sourceStockId) next[line.id] = true;
+    });
+    setDevisSoldSelection(next);
+  }
+
+  function clearSoldLineSelection() {
+    setDevisSoldSelection({});
+  }
+
+  function getSelectedSoldLines() {
+    return devisLines.filter((line) => devisSoldSelection[line.id]);
+  }
+
+  function applySoldLinesToStock() {
+    const selectedLines = getSelectedSoldLines();
+
+    if (selectedLines.length === 0) {
+      return alert("Sélectionne au moins une pièce vendue à retirer du stock.");
+    }
+
+    const stockLinkedLines = selectedLines.filter((line) => line.sourceStockId);
+
+    if (stockLinkedLines.length === 0) {
+      return alert("Les lignes sélectionnées ne viennent pas du stock, donc aucun stock à retirer.");
+    }
+
+    setPieces((prevPieces) =>
+      prevPieces.map((piece) => {
+        const totalSoldForPiece = stockLinkedLines
+          .filter((line) => line.sourceStockId === piece.id)
+          .reduce((sum, line) => sum + Number(line.quantite || 0), 0);
+
+        if (totalSoldForPiece <= 0) return piece;
+
+        return {
+          ...piece,
+          quantite: Math.max(0, Number(piece.quantite || 0) - totalSoldForPiece),
+          updatedAt: new Date().toLocaleString("fr-FR"),
+          updatedBy: currentUser?.name || "-",
+        };
+      })
+    );
+
+    addHistory(
+      "Retrait stock depuis devis",
+      `${stockLinkedLines.length} ligne(s) — ${stockLinkedLines.reduce((sum, line) => sum + Number(line.quantite || 0), 0)} pièce(s)`
+    );
+
+    setDevisLines((prevLines) =>
+      prevLines.map((line) =>
+        devisSoldSelection[line.id]
+          ? {
+              ...line,
+              soldFromDevis: Boolean(line.sourceStockId),
+              soldAt: new Date().toLocaleString("fr-FR"),
+              soldBy: currentUser?.name || "-",
+            }
+          : line
+      )
+    );
+
+    setDevisSoldSelection({});
+    alert("Stock retiré pour les pièces sélectionnées.");
+  }
+
+  function saveAndApplySoldLines(status = "Archivé") {
+    applySoldLinesToStock();
+    saveDevis(status);
+  }
+
+  function printDevisArchiveList(list, title) {
+    const rows = (list || [])
+      .map(
+        (d, i) => `
+          <tr>
+            <td>${i + 1}</td>
+            <td>${d.numero || "-"}</td>
+            <td>${d.client || "-"}</td>
+            <td>${d.plaque || "-"}</td>
+            <td>${d.vin || "-"}</td>
+            <td>${d.date || "-"}</td>
+            <td>${Number(d.totalTTC || 0).toFixed(2)} €</td>
+            <td>${d.fromCahier ? "Cahier" : "Devis"}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const total = (list || []).reduce((sum, d) => sum + Number(d.totalTTC || 0), 0);
+
+    const win = window.open("", "_blank");
+
+    win.document.write(`
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            @page { size: A4; margin: 14mm; }
+            body { font-family: Arial, sans-serif; color: #10234d; margin: 0; }
+            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #123f8f; padding-bottom: 12px; margin-bottom: 16px; }
+            .brand { display: flex; align-items: center; gap: 12px; }
+            .brand img { width: 70px; height: 70px; object-fit: contain; }
+            h1 { margin: 0; color: #123f8f; font-size: 20px; }
+            h2 { margin: 0; color: #123f8f; font-size: 22px; text-align: right; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            th { background: #123f8f; color: white; padding: 8px; text-align: left; font-size: 11px; }
+            td { border: 1px solid #d9e3f2; padding: 7px; font-size: 11px; }
+            .total { margin-top: 18px; margin-left: auto; width: 280px; background: #000; color: white; padding: 12px; font-weight: bold; display: flex; justify-content: space-between; border-radius: 10px; }
+            .footer { margin-top: 24px; border-top: 2px solid #123f8f; padding-top: 8px; text-align: center; font-size: 10px; color: #555; line-height: 1.5; }
+            @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="brand">
+              <img src="${logo}" />
+              <div>
+                <h1>${ENTREPRISE.nom}</h1>
+                <p>📍 ${ENTREPRISE.adresse}</p>
+                <p>📧 ${ENTREPRISE.email}</p>
+              </div>
+            </div>
+            <div>
+              <h2>${title}</h2>
+              <p>Date impression : ${new Date().toLocaleString("fr-FR")}</p>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>N°</th><th>Devis</th><th>Client</th><th>Plaque</th><th>VIN</th><th>Date</th><th>Total TTC</th><th>Source</th>
+              </tr>
+            </thead>
+            <tbody>${rows || `<tr><td colspan="8">Aucun devis.</td></tr>`}</tbody>
+          </table>
+
+          <div class="total"><span>Total TTC</span><span>${total.toFixed(2)} €</span></div>
+
+          <div class="footer">
+            ${ENTREPRISE.nom} — ${ENTREPRISE.adresse}<br/>
+            Email : ${ENTREPRISE.email} — Téléphone : ${ENTREPRISE.telephone} — WhatsApp : ${ENTREPRISE.whatsapp}<br/>
+            TVA : ${ENTREPRISE.tva}
+          </div>
+
+          <script>window.print();</script>
+        </body>
+      </html>
+    `);
+
+    win.document.close();
+    addHistory("Impression archive devis", `${title} — ${list.length} devis`);
   }
 
   function changeDevisForm(e) {
@@ -3379,7 +3598,7 @@ export default function App() {
                 <span>01</span>
                 <div>
                   <h3>{editingDevisId ? "Modifier le devis final" : "Devis final"}</h3>
-                  <p>Ouvre une demande depuis le Cahier : toutes les pièces demandées arrivent ici. Clique dans la référence pour chercher directement dans le stock et choisir prix particulier/pro.</p>
+                  <p>Ouvre une demande depuis le Cahier : les pièces demandées arrivent ici. Les pièces cochées avec stock seront retirées du stock quand elles sont vendues.</p>
                 </div>
               </div>
 
@@ -3453,6 +3672,7 @@ export default function App() {
                   <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: "18px", overflow: "hidden", border: "1px solid rgba(191, 212, 255, 0.85)" }}>
                     <thead>
                       <tr style={{ background: "#123f8f", color: "white" }}>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Vendu</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>N°</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Désignation</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Référence interne</th>
@@ -3465,6 +3685,16 @@ export default function App() {
                     <tbody>
                       {devisLines.map((line, index) => (
                         <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2", background: editingDevisLineId === line.id ? "#eaf1ff" : "white" }}>
+                          <td style={{ padding: "12px" }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(devisSoldSelection[line.id])}
+                              disabled={!line.sourceStockId}
+                              onChange={() => toggleDevisSoldLine(line.id)}
+                              title={line.sourceStockId ? "Retirer du stock si vendu" : "Cette pièce ne vient pas du stock"}
+                              style={{ width: "18px", height: "18px" }}
+                            />
+                          </td>
                           <td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td>
                           <td style={{ padding: "12px" }}>{line.designation}</td>
                           <td style={{ padding: "12px", minWidth: "260px" }}>
@@ -3578,6 +3808,12 @@ export default function App() {
               </section>
 
               <div className="actions" style={{ marginTop: "16px" }}>
+                <button type="button" onClick={selectAllStockLinesForSale}>Sélectionner pièces stock vendues</button>
+                <button type="button" onClick={clearSoldLineSelection}>Décocher vente</button>
+                <button type="button" onClick={applySoldLinesToStock}>Retirer du stock les pièces cochées</button>
+              </div>
+
+              <div className="actions" style={{ marginTop: "16px" }}>
                 <button onClick={() => saveDevis("Archivé")}>
                   {devisForm.demandeId ? "Valider le devis dans le Cahier" : "Valider le devis"}
                 </button>
@@ -3619,6 +3855,35 @@ export default function App() {
                   </div>
                 ))}
               </div>
+            </section>
+
+            <section className="panel stockPanel">
+              <div className="panelTitle">
+                <span>03</span>
+                <div>
+                  <h3>Archives devis jour / mois</h3>
+                  <p>Les devis sont regroupés par jour et par mois. Tu peux imprimer les archives.</p>
+                </div>
+              </div>
+
+              <div className="form" style={{ marginBottom: "16px" }}>
+                <input type="date" value={devisArchiveDate} onChange={(e) => setDevisArchiveDate(e.target.value)} />
+                <button type="button" onClick={() => printDevisArchiveList(getDevisArchiveByDate(devisArchiveDate), `Archives devis du ${new Date(devisArchiveDate).toLocaleDateString("fr-FR")}`)}>
+                  Imprimer jour
+                </button>
+
+                <input type="month" value={devisArchiveMonth} onChange={(e) => setDevisArchiveMonth(e.target.value)} />
+                <button type="button" onClick={() => printDevisArchiveList(getDevisArchiveByMonth(devisArchiveMonth), `Archives devis du mois ${devisArchiveMonth}`)}>
+                  Imprimer mois
+                </button>
+              </div>
+
+              <section className="stats">
+                <div><span>Jour sélectionné</span><strong>{getDevisArchiveByDate(devisArchiveDate).length}</strong></div>
+                <div><span>Total jour</span><strong>{getDevisArchiveByDate(devisArchiveDate).reduce((s, d) => s + Number(d.totalTTC || 0), 0).toFixed(2)} €</strong></div>
+                <div><span>Mois sélectionné</span><strong>{getDevisArchiveByMonth(devisArchiveMonth).length}</strong></div>
+                <div><span>Total mois</span><strong>{getDevisArchiveByMonth(devisArchiveMonth).reduce((s, d) => s + Number(d.totalTTC || 0), 0).toFixed(2)} €</strong></div>
+              </section>
             </section>
           </>
         )}
