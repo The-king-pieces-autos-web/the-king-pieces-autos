@@ -1352,6 +1352,22 @@ export default function App() {
   function printDevisRequest(request) {
     const pieces = String(request.piecesDemandees || "-").replace(/\n/g, "<br/>");
     const notes = String(request.notesInternes || "-").replace(/\n/g, "<br/>");
+    const archivedLines = request.devisArchiveComplet?.lignes || request.devisLignes || [];
+    const archivedRows = archivedLines
+      .map(
+        (line, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${line.designation || "-"}</td>
+            <td>${line.reference || "-"}</td>
+            <td>${line.quantite || 1}</td>
+            <td>${Number(line.prixFinalTTC || line.prixTTC || 0).toFixed(2)} €</td>
+            <td>${Number(line.totalFinalTTC || (Number(line.quantite || 0) * Number(line.prixFinalTTC || line.prixTTC || 0))).toFixed(2)} €</td>
+            <td>${line.validationClient || (line.confirmedByClient ? "Validé par le client" : "Non validé par le client")}</td>
+          </tr>
+        `
+      )
+      .join("");
 
     const win = window.open("", "_blank");
 
@@ -1420,6 +1436,30 @@ export default function App() {
               <p><strong>Pièces demandées :</strong></p>
               <p>${pieces}</p>
             </div>
+
+            ${
+              archivedRows
+                ? `
+                  <div class="box">
+                    <h3>Devis archivé complet</h3>
+                    <table style="width:100%; border-collapse:collapse; margin-top:10px;">
+                      <thead>
+                        <tr>
+                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">N°</th>
+                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Pièce</th>
+                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Référence</th>
+                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Qté</th>
+                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Prix</th>
+                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Total</th>
+                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Validation</th>
+                        </tr>
+                      </thead>
+                      <tbody>${archivedRows}</tbody>
+                    </table>
+                  </div>
+                `
+                : ""
+            }
 
             <div class="box">
               <h3>Notes internes</h3>
@@ -1933,12 +1973,19 @@ export default function App() {
 
     const numero = devisForm.numero || nextDevisNumero();
 
-    const allLinesForCahier = devisLines.map((line) => ({
-      ...line,
-      validationClient: line.confirmedByClient ? "Validé par le client" : "Non validé par le client",
-      prixFinalTTC: getLineUnitPrice(line),
-      totalFinalTTC: getLineTotal(line),
-    }));
+    const allLinesForCahier = devisLines.map((line) => {
+      const unitPrice =
+        line.deuxOffres && line.offreChoisie === "offre2"
+          ? Number(line.prixTTC2 || 0)
+          : Number(line.prixTTC || 0);
+
+      return {
+        ...line,
+        validationClient: line.confirmedByClient ? "Validé par le client" : "Non validé par le client",
+        prixFinalTTC: unitPrice,
+        totalFinalTTC: Number(line.quantite || 0) * unitPrice,
+      };
+    });
 
     const confirmedLinesForDevis = allLinesForCahier.filter((line) => line.confirmedByClient);
 
@@ -1949,6 +1996,8 @@ export default function App() {
     const totalConfirmedTTC = confirmedLinesForDevis.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
     const totalConfirmedHT = totalConfirmedTTC / 1.2;
     const tvaConfirmed = totalConfirmedTTC - totalConfirmedHT;
+
+    const totalAllTTC = allLinesForCahier.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
 
     const savedDevis = {
       id: editingDevisId || Date.now(),
@@ -1979,6 +2028,15 @@ export default function App() {
     }
 
     if (devisForm.demandeId) {
+      const archiveComplet = {
+        ...savedDevis,
+        lignes: allLinesForCahier,
+        totalToutesPiecesTTC: totalAllTTC,
+        totalPiecesValideesTTC: totalConfirmedTTC,
+        archivedAt: new Date().toLocaleString("fr-FR"),
+        archivedBy: currentUser?.name || "-",
+      };
+
       setDevisRequests((prev) =>
         prev.map((request) =>
           request.id === devisForm.demandeId
@@ -1991,16 +2049,11 @@ export default function App() {
                 vin: devisForm.vin || request.vin || "",
                 marque: devisForm.marque || request.marque || "",
                 modele: devisForm.modele || request.modele || "",
-                devisArchiveComplet: {
-                  ...savedDevis,
-                  lignes: allLinesForCahier,
-                  totalToutesPiecesTTC: allLinesForCahier.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0),
-                  totalPiecesValideesTTC: totalConfirmedTTC,
-                },
+                devisArchiveComplet: archiveComplet,
                 devis: savedDevis,
                 devisNumero: numero,
                 devisLignes: allLinesForCahier,
-                devisTotalToutesPiecesTTC: allLinesForCahier.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0),
+                devisTotalToutesPiecesTTC: totalAllTTC,
                 devisTotalValideTTC: totalConfirmedTTC,
                 devisTotalTTC: totalConfirmedTTC,
                 updatedAt: new Date().toLocaleString("fr-FR"),
@@ -3682,6 +3735,13 @@ export default function App() {
                       <p>Plaque : {request.plaque || "-"} — VIN : {request.vin || "-"}</p>
                       <p>Pièces : {String(request.piecesDemandees || "-").slice(0, 140)}</p>
                       <span>Statut : {request.statut} — Salarié : {request.createdByName || "-"} — {request.createdAt}</span>
+                      {(request.devisArchiveComplet || request.devisLignes?.length > 0) && (
+                        <span>
+                          Devis archivé : {request.devisNumero || "-"} —
+                          Total toutes pièces : {Number(request.devisTotalToutesPiecesTTC || request.devisArchiveComplet?.totalToutesPiecesTTC || 0).toFixed(2)} € —
+                          Validé : {Number(request.devisTotalValideTTC || request.devisArchiveComplet?.totalPiecesValideesTTC || 0).toFixed(2)} €
+                        </span>
+                      )}
                       {request.devisTotalTTC && <span>Devis dans cette demande : {request.devisNumero || "-"} — {Number(request.devisTotalTTC).toFixed(2)} €</span>}
 
                       <div className="actions" style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
