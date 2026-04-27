@@ -315,6 +315,122 @@ export default function App() {
     return (list || []).map(normalizePiece);
   }
 
+  function dbStockToAppPiece(row) {
+    return normalizePiece({
+      id: row.id,
+      legacyId: row.legacy_id || "",
+      designation: row.designation || "",
+      famille: row.famille || "",
+      sousFamille: row.sous_famille || "",
+      refOrigine: row.ref_origine || "",
+      refInterne: row.ref_interne || "",
+      fournisseur: row.fournisseur || "",
+      quantite: Number(row.quantite || 0),
+      rupture: Number(row.stock_minimum ?? 1),
+      prixPart: Number(row.prix_part || 0),
+      prixPro: Number(row.prix_pro || 0),
+      image: row.image_url || "",
+      commentaire: row.commentaire || "",
+      createdBy: row.created_by || "",
+      updatedBy: row.updated_by || "",
+      createdAt: row.created_at || "",
+      updatedAt: row.updated_at || "",
+      sourceDb: "stock_items",
+    });
+  }
+
+  function appPieceToDbStock(piece) {
+    return {
+      designation: piece.designation || "",
+      famille: piece.famille || "",
+      sous_famille: piece.sousFamille || "",
+      ref_origine: piece.refOrigine || "",
+      ref_interne: piece.refInterne || "",
+      fournisseur: piece.fournisseur || "",
+      quantite: Number(piece.quantite || 0),
+      stock_minimum: Number(piece.rupture ?? 1),
+      prix_part: Number(piece.prixPart || 0),
+      prix_pro: Number(piece.prixPro || 0),
+      image_url: piece.image || "",
+      commentaire: piece.commentaire || "",
+      updated_by: currentUser?.login || currentUser?.name || "system",
+    };
+  }
+
+  async function loadStockItemsFromDb() {
+    const { data, error } = await supabase
+      .from("stock_items")
+      .select("*")
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      console.error("Chargement stock_items impossible", error);
+      return null;
+    }
+
+    return normalizePieces((data || []).map(dbStockToAppPiece));
+  }
+
+  async function reloadStockFromDb() {
+    const professionalStock = await loadStockItemsFromDb();
+    if (professionalStock) {
+      setPieces(professionalStock);
+      addHistory("Rechargement stock", "Stock rechargé depuis stock_items");
+    }
+  }
+
+  async function insertStockItemInDb(piece) {
+    const payload = {
+      ...appPieceToDbStock(piece),
+      created_by: currentUser?.login || currentUser?.name || "system",
+    };
+
+    const { data, error } = await supabase
+      .from("stock_items")
+      .insert(payload)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return dbStockToAppPiece(data);
+  }
+
+  async function updateStockItemInDb(id, piece) {
+    const { data, error } = await supabase
+      .from("stock_items")
+      .update(appPieceToDbStock(piece))
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return dbStockToAppPiece(data);
+  }
+
+  async function deleteStockItemInDb(id) {
+    const { error } = await supabase
+      .from("stock_items")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+  }
+
+  async function updateStockQuantityInDb(id, nextQuantity) {
+    const { data, error } = await supabase
+      .from("stock_items")
+      .update({
+        quantite: Number(nextQuantity || 0),
+        updated_by: currentUser?.login || currentUser?.name || "system",
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return dbStockToAppPiece(data);
+  }
+
   function compressImageFile(file, maxWidth = 700, quality = 0.58) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -386,7 +502,8 @@ export default function App() {
       try {
         const remoteState = await loadAppState();
 
-        setPieces(normalizePieces(remoteState.pieces || []));
+        const professionalStock = await loadStockItemsFromDb();
+        setPieces(professionalStock && professionalStock.length ? professionalStock : normalizePieces(remoteState.pieces || []));
         setHistory(remoteState.history || []);
         setManualOrders(remoteState.manualOrders || []);
         setOrderedAutoIds(remoteState.orderedAutoIds || []);
@@ -793,54 +910,62 @@ export default function App() {
     setForm({ ...form, image: "" });
   }
 
-  function ajouter(e) {
+  async function ajouter(e) {
     e.preventDefault();
 
     if (!form.designation || !form.famille || !form.sousFamille) {
       return alert("Complète au minimum le nom de la pièce, la famille et la sous-famille.");
     }
 
-    if (editingPieceId) {
-      const updatedPiece = normalizePiece({
-        id: editingPieceId,
+    try {
+      if (editingPieceId) {
+        const updatedPiecePayload = normalizePiece({
+          id: editingPieceId,
+          ...form,
+          quantite: Number(form.quantite || 0),
+          rupture: Number(form.rupture || 1),
+          updatedBy: currentUser?.login || currentUser?.name,
+          updatedAt: new Date().toLocaleString("fr-FR"),
+        });
+
+        const updatedPiece = await updateStockItemInDb(editingPieceId, updatedPiecePayload);
+
+        setPieces(pieces.map((piece) => (piece.id === editingPieceId ? updatedPiece : piece)));
+        addHistory("Modification pièce stock", `${form.designation} — ${form.famille} / ${form.sousFamille}`);
+        cancelEditPiece();
+        return;
+      }
+
+      const newPiecePayload = normalizePiece({
         ...form,
         quantite: Number(form.quantite || 0),
-        rupture: Number(form.rupture || 2),
-        updatedBy: currentUser?.login,
-        updatedAt: new Date().toLocaleString("fr-FR"),
+        rupture: Number(form.rupture || 1),
+        createdBy: currentUser?.login || currentUser?.name,
+        createdAt: new Date().toLocaleString("fr-FR"),
       });
 
-      setPieces(pieces.map((piece) => (piece.id === editingPieceId ? updatedPiece : piece)));
-      addHistory("Modification pièce stock", `${form.designation} — ${form.famille} / ${form.sousFamille}`);
-      cancelEditPiece();
-      return;
+      const newPiece = await insertStockItemInDb(newPiecePayload);
+
+      setPieces([newPiece, ...pieces]);
+      addHistory("Ajout pièce", `${form.designation} — ${form.famille} / ${form.sousFamille}`);
+
+      setForm({
+        designation: "",
+        famille: "",
+        sousFamille: "",
+        refOrigine: "",
+        refInterne: "",
+        fournisseur: "",
+        quantite: "",
+        rupture: "1",
+        prixPart: "",
+        prixPro: "",
+        image: "",
+      });
+    } catch (error) {
+      console.error("Erreur sauvegarde stock_items", error);
+      alert("Erreur Supabase : impossible d'enregistrer la pièce dans stock_items.");
     }
-
-    const newPiece = normalizePiece({
-      id: Date.now(),
-      ...form,
-      quantite: Number(form.quantite || 0),
-      rupture: Number(form.rupture || 2),
-      createdBy: currentUser?.login,
-      createdAt: new Date().toLocaleString("fr-FR"),
-    });
-
-    setPieces([newPiece, ...pieces]);
-    addHistory("Ajout pièce", `${form.designation} — ${form.famille} / ${form.sousFamille}`);
-
-    setForm({
-      designation: "",
-      famille: "",
-      sousFamille: "",
-      refOrigine: "",
-      refInterne: "",
-      fournisseur: "",
-      quantite: "",
-      rupture: "1",
-      prixPart: "",
-      prixPro: "",
-      image: "",
-    });
   }
 
   function startEditPiece(piece) {
@@ -879,21 +1004,42 @@ export default function App() {
     });
   }
 
-  function vendre(id) {
+  async function vendre(id) {
     const piece = pieces.find((p) => p.id === id);
-    setPieces(pieces.map((p) => (p.id === id ? { ...p, quantite: Math.max(0, Number(p.quantite) - 1) } : p)));
-    if (piece) {
+    if (!piece) return;
+
+    const nextQuantity = Math.max(0, Number(piece.quantite || 0) - 1);
+
+    try {
+      const updatedPiece = await updateStockQuantityInDb(id, nextQuantity);
+
+      setPieces(pieces.map((p) => (p.id === id ? updatedPiece : p)));
       setOrderedAutoIds((prev) => prev.filter((x) => x !== id));
       addHistory("Vente pièce", `${piece.designation} — stock diminué de 1`);
+    } catch (error) {
+      console.error("Erreur vente stock_items", error);
+      alert("Erreur Supabase : stock non diminué.");
     }
   }
 
-  function supprimer(id) {
+  async function supprimer(id) {
     if (!isAdmin) return alert("Seul l'administrateur peut supprimer une pièce.");
+
     const piece = pieces.find((p) => p.id === id);
-    setPieces(pieces.filter((p) => p.id !== id));
-    setOrderedAutoIds((prev) => prev.filter((x) => x !== id));
-    if (piece) addHistory("Suppression pièce", piece.designation);
+    if (!piece) return;
+
+    if (!window.confirm(`Supprimer définitivement la pièce : ${piece.designation} ?`)) return;
+
+    try {
+      await deleteStockItemInDb(id);
+
+      setPieces(pieces.filter((p) => p.id !== id));
+      setOrderedAutoIds((prev) => prev.filter((x) => x !== id));
+      addHistory("Suppression pièce", piece.designation);
+    } catch (error) {
+      console.error("Erreur suppression stock_items", error);
+      alert("Erreur Supabase : impossible de supprimer la pièce.");
+    }
   }
 
   function normalizeTextForMatch(value) {
@@ -1507,7 +1653,7 @@ export default function App() {
       .slice(0, 12);
   }
 
-  function decreaseStockFromDevisLine(line) {
+  async function decreaseStockFromDevisLine(line) {
     if (!line.sourceStockId) {
       return alert("Cette ligne n'est pas liée à une pièce du stock.");
     }
@@ -1516,36 +1662,33 @@ export default function App() {
     if (!piece) return alert("Pièce stock introuvable.");
 
     const qty = Number(line.quantite || 1);
+    const nextQuantity = Math.max(0, Number(piece.quantite || 0) - qty);
 
     if (!window.confirm(`Retirer ${qty} pièce(s) du stock pour : ${piece.designation} ?`)) return;
 
-    setPieces((prevPieces) =>
-      prevPieces.map((p) =>
-        p.id === line.sourceStockId
-          ? {
-              ...p,
-              quantite: Math.max(0, Number(p.quantite || 0) - qty),
-              updatedAt: new Date().toLocaleString("fr-FR"),
-              updatedBy: currentUser?.name || "-",
-            }
-          : p
-      )
-    );
+    try {
+      const updatedPiece = await updateStockQuantityInDb(piece.id, nextQuantity);
 
-    setDevisLines((prevLines) =>
-      prevLines.map((l) =>
-        l.id === line.id
-          ? {
-              ...l,
-              stockRetire: true,
-              stockRetireAt: new Date().toLocaleString("fr-FR"),
-              stockRetireBy: currentUser?.name || "-",
-            }
-          : l
-      )
-    );
+      setPieces((prevPieces) => prevPieces.map((p) => (p.id === piece.id ? updatedPiece : p)));
 
-    addHistory("Stock retiré depuis devis", `${piece.designation} — quantité ${qty}`);
+      setDevisLines((prevLines) =>
+        prevLines.map((l) =>
+          l.id === line.id
+            ? {
+                ...l,
+                stockRetire: true,
+                stockRetireAt: new Date().toLocaleString("fr-FR"),
+                stockRetireBy: currentUser?.name || "-",
+              }
+            : l
+        )
+      );
+
+      addHistory("Stock retiré depuis devis", `${piece.designation} — quantité ${qty}`);
+    } catch (error) {
+      console.error("Erreur retrait stock devis", error);
+      alert("Erreur Supabase : stock non retiré.");
+    }
   }
 
   function applyStockPieceToDevisLine(lineId, piece, priceType) {
@@ -1801,32 +1944,42 @@ export default function App() {
     }));
   }
 
-  function removeConfirmedStockLinesFromStock() {
+  async function removeConfirmedStockLinesFromStock() {
     const confirmedStockLines = devisLines.filter((line) => line.confirmedByClient && line.sourceStockId);
 
     if (confirmedStockLines.length === 0) return;
 
-    setPieces((prevPieces) =>
-      prevPieces.map((piece) => {
-        const totalSold = confirmedStockLines
-          .filter((line) => line.sourceStockId === piece.id)
-          .reduce((sum, line) => sum + Number(line.quantite || 0), 0);
+    const updates = [];
 
-        if (totalSold <= 0) return piece;
+    for (const piece of pieces) {
+      const totalSold = confirmedStockLines
+        .filter((line) => line.sourceStockId === piece.id)
+        .reduce((sum, line) => sum + Number(line.quantite || 0), 0);
 
-        return {
-          ...piece,
-          quantite: Math.max(0, Number(piece.quantite || 0) - totalSold),
-          updatedAt: new Date().toLocaleString("fr-FR"),
-          updatedBy: currentUser?.name || "-",
-        };
-      })
-    );
+      if (totalSold > 0) {
+        const nextQuantity = Math.max(0, Number(piece.quantite || 0) - totalSold);
+        updates.push(updateStockQuantityInDb(piece.id, nextQuantity));
+      }
+    }
 
-    addHistory(
-      "Retrait stock devis validé",
-      `${confirmedStockLines.length} ligne(s) validée(s) par le client`
-    );
+    try {
+      const updatedPieces = await Promise.all(updates);
+
+      setPieces((prevPieces) =>
+        prevPieces.map((piece) => {
+          const updated = updatedPieces.find((p) => p.id === piece.id);
+          return updated || piece;
+        })
+      );
+
+      addHistory(
+        "Retrait stock devis validé",
+        `${confirmedStockLines.length} ligne(s) validée(s) par le client`
+      );
+    } catch (error) {
+      console.error("Erreur retrait stock devis validé", error);
+      alert("Erreur Supabase : certaines quantités stock n'ont pas été mises à jour.");
+    }
   }
 
   function changeDevisForm(e) {
@@ -1967,7 +2120,7 @@ export default function App() {
     setDevisLine({ designation: "", reference: "", quantite: "1", prixTTC: "", deuxOffres: false, fournisseur1: "", dateDispo1: "Sur place", reference2: "", prixTTC2: "", fournisseur2: "", dateDispo2: "", offreChoisie: "offre1" });
   }
 
-  function saveDevis(status = "Archivé") {
+  async function saveDevis(status = "Archivé") {
     if (!devisForm.client) return alert("Nom client obligatoire.");
     if (devisLines.length === 0) return alert("Ajoute au moins une ligne au devis.");
 
@@ -3381,7 +3534,7 @@ export default function App() {
 
             <section className="contentGrid">
               <div className="panel formPanel">
-                <div className="panelTitle"><span>01</span><div><h3>{editingPieceId ? "Modifier une pièce" : "Ajouter une pièce"}</h3><p>Choisis une famille puis une sous-famille. Le stock à commander se déclenche seulement si la quantité est inférieure au stock minimum voulu.</p></div></div>
+                <div className="panelTitle"><span>01</span><div><h3>{editingPieceId ? "Modifier une pièce" : "Ajouter une pièce"}</h3><p>Stock branché sur la table professionnelle Supabase stock_items. Choisis une famille puis une sous-famille.</p></div></div>
                 <form className="form" onSubmit={ajouter}>
                   <input name="designation" value={form.designation} onChange={change} placeholder="Nom de la pièce" />
                   <select name="famille" value={form.famille} onChange={change}>
