@@ -373,9 +373,11 @@ export default function App() {
 
   function dbCahierToApp(row) {
     const pieces =
-      Array.isArray(row.pieces_demandees)
-        ? row.pieces_demandees
-        : [];
+      Array.isArray(row.pieces)
+        ? row.pieces
+        : Array.isArray(row.pieces_demandees)
+          ? row.pieces_demandees
+          : [];
 
     const piecesText = pieces
       .map((item) => {
@@ -387,9 +389,8 @@ export default function App() {
 
     return {
       id: row.id,
-      legacyId: row.legacy_id || "",
       cahierNumero: row.cahier_numero || "",
-      type: row.type_demande || "Sur place",
+      type: row.canal || row.type_demande || "Sur place",
       statut: row.statut || "En attente",
       client: row.client || "",
       telephone: row.telephone || "",
@@ -400,46 +401,57 @@ export default function App() {
       marque: row.marque || "",
       modele: row.modele || "",
       piecesDemandees: piecesText,
-      notesInternes: row.notes_internes || "",
+      notesInternes: row.notes || row.notes_internes || row.demande_complete || "",
       createdByLogin: row.created_by_login || "",
       createdByName: row.created_by_name || "",
       updatedBy: row.updated_by || "",
-      createdAt: row.created_at ? new Date(row.created_at).toLocaleString("fr-FR") : "",
-      updatedAt: row.updated_at ? new Date(row.updated_at).toLocaleString("fr-FR") : "",
+      createdAt: row.created_at || "",
+      updatedAt: row.updated_at || "",
+      devisNumero: row.devis_numero || "",
+      devisLignes: row.devis_lignes || [],
+      devisTotalTTC: row.total_ttc || 0,
       sourceDb: "cahier_demandes",
     };
   }
 
-  function appCahierToDb(request) {
+    function appCahierToDb(request) {
     return {
+      id: typeof request.id === "number" ? request.id : Date.now(),
       cahier_numero: request.cahierNumero || `CH-${Date.now()}`,
-      type_demande: request.type || "Sur place",
-      statut: request.statut || "En attente",
       client: request.client || "",
       telephone: request.telephone || "",
-      whatsapp: request.whatsapp || "",
-      client_type: request.clientType || "Particulier",
+      canal: request.type || "Sur place",
       plaque: request.plaque || "",
       vin: request.vin || "",
       marque: request.marque || "",
       modele: request.modele || "",
-      pieces_demandees: parseRequestedPieces(request.piecesDemandees || "").map((designation, index) => ({
+      pieces: parseRequestedPieces(request.piecesDemandees || "").map((designation, index) => ({
         id: index + 1,
+        nom: designation,
         designation,
       })),
-      notes_internes: request.notesInternes || "",
+      pieces_demandees: parseRequestedPieces(request.piecesDemandees || "").map((designation, index) => ({
+        id: index + 1,
+        nom: designation,
+        designation,
+      })),
+      notes: request.notesInternes || "",
+      demande_complete: request.notesInternes || "",
+      statut: request.statut || "En attente",
       created_by_login: request.createdByLogin || currentUser?.login || "",
       created_by_name: request.createdByName || currentUser?.name || "",
+      created_at: request.createdAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       updated_by: currentUser?.name || currentUser?.login || "system",
+      is_active: true,
     };
   }
 
-  function dbDevisToApp(row) {
+    function dbDevisToApp(row) {
     const lignes = Array.isArray(row.lignes) ? row.lignes : [];
 
     return {
       id: row.id,
-      legacyId: row.legacy_id || "",
       numero: row.devis_numero || "",
       cahierDemandeId: row.cahier_demande_id || "",
       client: row.client || "",
@@ -454,54 +466,42 @@ export default function App() {
       lignes,
       lignesCompletesCahier: Array.isArray(row.lignes_completes_cahier) ? row.lignes_completes_cahier : lignes,
       sousTotalHT: Number(row.sous_total_ht || 0),
-      sousTotalTTC: Number(row.sous_total_ttc || 0),
+      sousTotalTTC: Number(row.sous_total_ttc || row.total_ttc || 0),
       remiseHT: Number(row.remise_ht || 0),
       remiseTTC: Number(row.remise_ttc || 0),
       totalHT: Number(row.total_ht || 0),
       tva: Number(row.tva || 0),
       totalTTC: Number(row.total_ttc || 0),
-      totalToutesPiecesTTC: Number(row.total_toutes_pieces_ttc || 0),
-      totalValideClientTTC: Number(row.total_valide_client_ttc || 0),
+      totalToutesPiecesTTC: Number(row.total_toutes_pieces_ttc || row.total_ttc || 0),
+      totalValideClientTTC: Number(row.total_valide_client_ttc || row.total_ttc || 0),
       notesInternes: row.notes_internes || "",
       createdBy: row.created_by || "",
       updatedBy: row.updated_by || "",
-      createdAt: row.created_at ? new Date(row.created_at).toLocaleString("fr-FR") : "",
-      updatedAt: row.updated_at ? new Date(row.updated_at).toLocaleString("fr-FR") : "",
+      createdAt: row.created_at || "",
+      updatedAt: row.updated_at || "",
       sourceDb: "devis",
     };
   }
 
-  function appDevisToDb(devisItem) {
+    function appDevisToDb(devisItem) {
     return {
+      id: typeof devisItem.id === "number" ? devisItem.id : Date.now(),
       devis_numero: devisItem.numero || nextDevisNumero(),
       cahier_demande_id: devisItem.demandeId || devisItem.cahierDemandeId || null,
       client: devisItem.client || "",
-      telephone: devisItem.telephone || "",
-      date_devis: devisItem.date || new Date().toISOString().slice(0, 10),
-      marque: devisItem.marque || "",
-      modele: devisItem.modele || "",
       plaque: devisItem.plaque || "",
       vin: devisItem.vin || "",
-      origine_demande: devisItem.origineDemande || "",
-      statut: devisItem.status || "Archivé",
       lignes: devisItem.lignes || [],
-      lignes_completes_cahier: devisItem.lignesCompletesCahier || devisItem.lignes || [],
-      sous_total_ht: Number(devisItem.sousTotalHT || 0),
-      sous_total_ttc: Number(devisItem.sousTotalTTC || 0),
-      remise_ht: Number(devisItem.remiseHT || 0),
-      remise_ttc: Number(devisItem.remiseTTC || 0),
-      total_ht: Number(devisItem.totalHT || 0),
-      tva: Number(devisItem.tva || 0),
       total_ttc: Number(devisItem.totalTTC || 0),
       total_toutes_pieces_ttc: Number(devisItem.totalToutesPiecesTTC || devisItem.totalTTC || 0),
       total_valide_client_ttc: Number(devisItem.totalValideClientTTC || devisItem.totalTTC || 0),
-      notes_internes: devisItem.notesInternes || "",
-      created_by: devisItem.createdBy || currentUser?.name || "",
-      updated_by: currentUser?.name || currentUser?.login || "system",
+      statut: devisItem.status || "Archivé",
+      created_at: devisItem.createdAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
   }
 
-  async function loadCahierFromDb() {
+    async function loadCahierFromDb() {
     const { data, error } = await supabase
       .from("cahier_demandes")
       .select("*")
@@ -536,7 +536,10 @@ export default function App() {
       .select("*")
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("Supabase cahier_demandes error:", error);
+      throw error;
+    }
     return dbCahierToApp(data);
   }
 
