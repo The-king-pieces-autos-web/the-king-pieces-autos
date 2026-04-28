@@ -337,11 +337,12 @@ export default function App() {
     };
   }
 
-  async function loadStockItemsFromDb() {
+  async function loadStockItemsFromDb(limit = 500) {
     const { data, error } = await supabase
       .from("stock_items")
       .select("*")
-      .order("updated_at", { ascending: false });
+      .order("updated_at", { ascending: false })
+      .limit(limit);
 
     if (error) {
       console.error("Chargement stock_items impossible", error);
@@ -412,11 +413,12 @@ export default function App() {
     };
   }
 
-    async function loadDevisFromDb() {
+    async function loadDevisFromDb(limit = 150) {
     const { data, error } = await supabase
       .from("devis")
       .select("*")
-      .order("updated_at", { ascending: false });
+      .order("updated_at", { ascending: false })
+      .limit(limit);
 
     if (error) {
       console.error("Chargement devis impossible", error);
@@ -847,20 +849,26 @@ export default function App() {
     };
   }
 
-  async function loadClientsFromDb() {
+  async function loadClientsFromDb(limit = 150) {
     const { data: clientRows, error: clientError } = await supabase
       .from("clients")
       .select("*")
-      .order("updated_at", { ascending: false });
+      .order("updated_at", { ascending: false })
+      .limit(limit);
 
     if (clientError) {
       console.error("Chargement clients impossible", clientError);
       return null;
     }
 
+    const clientIds = (clientRows || []).map((client) => client.id);
+
+    if (clientIds.length === 0) return [];
+
     const { data: pieceRows, error: pieceError } = await supabase
       .from("client_pieces")
       .select("*")
+      .in("client_id", clientIds)
       .order("created_at", { ascending: false });
 
     if (pieceError) {
@@ -871,7 +879,9 @@ export default function App() {
     const { data: paiementRows, error: paiementError } = await supabase
       .from("client_paiements")
       .select("*")
-      .order("date_paiement", { ascending: false });
+      .in("client_id", clientIds)
+      .order("date_paiement", { ascending: false })
+      .limit(500);
 
     if (paiementError) {
       console.error("Chargement client_paiements impossible", paiementError);
@@ -885,6 +895,40 @@ export default function App() {
         (paiementRows || []).filter((p) => String(p.client_id) === String(client.id))
       )
     );
+  }
+
+  async function loadUsersFromDb() {
+    const { data, error } = await supabase
+      .from("users_app")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.error("Chargement users_app impossible", error);
+      return null;
+    }
+
+    return data || [];
+  }
+
+  async function reloadUsersFromDb() {
+    const dbUsers = await loadUsersFromDb();
+    if (dbUsers?.length) {
+      setUsers(dbUsers);
+      const savedUser = localStorage.getItem("king_current_user");
+      if (savedUser) {
+        try {
+          const parsedUser = JSON.parse(savedUser);
+          const freshUser = dbUsers.find((u) => u.id === parsedUser.id || u.login === parsedUser.login);
+          if (freshUser) {
+            setCurrentUser(freshUser);
+            localStorage.setItem("king_current_user", JSON.stringify(freshUser));
+          }
+        } catch {
+          // rien
+        }
+      }
+    }
   }
 
   async function reloadClientsFromDb() {
@@ -1276,6 +1320,52 @@ export default function App() {
 
     startApp();
   }, []);
+
+  useEffect(() => {
+    if (!connected || !appLoaded) return;
+
+    const timers = {};
+    const debounceReload = (key, fn) => {
+      window.clearTimeout(timers[key]);
+      timers[key] = window.setTimeout(() => {
+        fn().catch((error) => console.error(`Realtime ${key} impossible`, error));
+      }, 350);
+    };
+
+    const channel = supabase
+      .channel("king-app-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "stock_items" }, () => {
+        debounceReload("stock", reloadStockFromDb);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "devis" }, async () => {
+        debounceReload("devis", async () => {
+          const dbDevis = await loadDevisFromDb();
+          if (Array.isArray(dbDevis)) setDevis(dbDevis);
+        });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, () => {
+        debounceReload("clients", reloadClientsFromDb);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "client_pieces" }, () => {
+        debounceReload("clients", reloadClientsFromDb);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "client_paiements" }, () => {
+        debounceReload("clients", reloadClientsFromDb);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "users_app" }, () => {
+        debounceReload("users", reloadUsersFromDb);
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          console.log("Synchronisation multi-PC active");
+        }
+      });
+
+    return () => {
+      Object.values(timers).forEach((timer) => window.clearTimeout(timer));
+      supabase.removeChannel(channel);
+    };
+  }, [connected, appLoaded]);
 
   useEffect(() => {
     if (!appLoaded) return;
