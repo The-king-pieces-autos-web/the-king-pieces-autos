@@ -133,7 +133,7 @@ function getSousFamillesByFamille(value) {
   return CATALOGUE[normalized] || [];
 }
 
-const MODULES = ["Stock", "Stock à commander", "Cahier", "Devis", "Clients", "Utilisateurs", "Historique"];
+const MODULES = ["Stock", "Stock à commander", "Devis", "Clients", "Utilisateurs", "Historique"];
 
 export default function App() {
   const [connected, setConnected] = useState(() => {
@@ -160,15 +160,11 @@ export default function App() {
   const [orderedAutoIds, setOrderedAutoIds] = useState([]);
   const [orderArchives, setOrderArchives] = useState([]);
   const [devis, setDevis] = useState([]);
-  const [devisRequests, setDevisRequests] = useState([]);
   const [clients, setClients] = useState([]);
 
   const [search, setSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
-  const [devisRequestSearch, setDevisRequestSearch] = useState("");
   const [devisSearch, setDevisSearch] = useState("");
-  const [devisRequestTypeFilter, setDevisRequestTypeFilter] = useState("Tous");
-  const [devisRequestUserFilter, setDevisRequestUserFilter] = useState("Tous");
   const [familleActive, setFamilleActive] = useState("");
 
   const [editingUserId, setEditingUserId] = useState(null);
@@ -176,7 +172,6 @@ export default function App() {
   const [editingPieceId, setEditingPieceId] = useState(null);
   const [editingOrderArchiveId, setEditingOrderArchiveId] = useState(null);
   const [editingDevisId, setEditingDevisId] = useState(null);
-  const [editingDevisRequestId, setEditingDevisRequestId] = useState(null);
   const [editingDevisLineId, setEditingDevisLineId] = useState(null);
   const [editingClientId, setEditingClientId] = useState(null);
   const [editingClientPieceId, setEditingClientPieceId] = useState(null);
@@ -185,7 +180,6 @@ export default function App() {
   const [selectedPiece, setSelectedPiece] = useState(null);
   const [selectedArchive, setSelectedArchive] = useState(null);
   const [selectedDevis, setSelectedDevis] = useState(null);
-  const [selectedDevisRequest, setSelectedDevisRequest] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedClientArchive, setSelectedClientArchive] = useState(null);
   const [clientPrintDate, setClientPrintDate] = useState(new Date().toISOString().slice(0, 10));
@@ -217,23 +211,6 @@ export default function App() {
     quantite: "1",
     prix: "",
   });
-
-  const [devisRequestForm, setDevisRequestForm] = useState({
-    type: "Sur place",
-    statut: "En attente",
-    client: "",
-    telephone: "",
-    whatsapp: "",
-    clientType: "Particulier",
-    plaque: "",
-    vin: "",
-    marque: "",
-    modele: "",
-    piecesDemandees: "",
-    notesInternes: "",
-  });
-
-  const [requestPieceInput, setRequestPieceInput] = useState("");
 
   const [devisForm, setDevisForm] = useState({
     numero: "",
@@ -374,120 +351,12 @@ export default function App() {
     return normalizePieces((data || []).map(dbStockToAppPiece));
   }
 
-  function dbCahierToApp(row) {
-    const pieces =
-      Array.isArray(row.pieces)
-        ? row.pieces
-        : Array.isArray(row.pieces_demandees)
-          ? row.pieces_demandees
-          : [];
-
-    const piecesText = pieces
-      .map((item) => {
-        if (typeof item === "string") return item;
-        return item?.designation || item?.nom || item?.piece || "";
-      })
-      .filter(Boolean)
-      .join("\n");
-
-    const devisLignes = Array.isArray(row.devis_lignes) ? row.devis_lignes : [];
-
-    return {
-      id: row.id,
-      legacyId: row.legacy_id || "",
-      cahierNumero: row.cahier_numero || "",
-      type: row.canal || row.type_demande || "Sur place",
-      statut: row.statut || "En attente",
-      client: row.client || "",
-      telephone: row.telephone || "",
-      whatsapp: row.whatsapp || "",
-      clientType: row.client_type || "Particulier",
-      plaque: row.plaque || "",
-      vin: row.vin || "",
-      marque: row.marque || "",
-      modele: row.modele || "",
-      piecesDemandees: piecesText,
-      notesInternes: row.notes || row.notes_internes || row.demande_complete || "",
-      createdByLogin: row.created_by_login || "",
-      createdByName: row.created_by_name || "",
-      updatedBy: row.updated_by || "",
-      createdAt: row.created_at || "",
-      updatedAt: row.updated_at || "",
-      devisNumero: row.devis_numero || "",
-      devisLignes,
-      devisArchiveComplet: devisLignes.length
-        ? {
-            numero: row.devis_numero || "",
-            lignes: devisLignes,
-            totalToutesPiecesTTC: Number(row.total_ttc || 0),
-            totalPiecesValideesTTC: devisLignes
-              .filter((line) => line.confirmedByClient)
-              .reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0),
-          }
-        : null,
-      devisTotalTTC: Number(row.total_ttc || 0),
-      devisTotalToutesPiecesTTC: Number(row.total_ttc || 0),
-      devisTotalValideTTC: devisLignes
-        .filter((line) => line.confirmedByClient)
-        .reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0),
-      sourceDb: "cahier_demandes",
-    };
-  }
-
-    function appCahierToDb(request) {
-    const id = String(request.id || Date.now());
-
-    const piecesArray = parseRequestedPieces(request.piecesDemandees || "").map((designation, index) => ({
-      id: index + 1,
-      nom: designation,
-      designation,
-    }));
-
-    const devisLignes = request.devisLignes || request.devisArchiveComplet?.lignes || [];
-    const totalTTC =
-      Number(request.devisTotalToutesPiecesTTC || 0) ||
-      Number(request.devisArchiveComplet?.totalToutesPiecesTTC || 0) ||
-      devisLignes.reduce((sum, line) => sum + Number(line.totalFinalTTC || (Number(line.quantite || 0) * Number(line.prixFinalTTC || line.prixTTC || 0))), 0);
-
-    return {
-      id,
-      legacy_id: request.legacyId || null,
-      cahier_numero: request.cahierNumero || `CH-${Date.now()}`,
-      client: request.client || "",
-      telephone: request.telephone || "",
-      whatsapp: request.whatsapp || "",
-      canal: request.type || "Sur place",
-      type_demande: request.type || "Sur place",
-      client_type: request.clientType || "Particulier",
-      plaque: request.plaque || "",
-      vin: request.vin || "",
-      marque: request.marque || "",
-      modele: request.modele || "",
-      pieces: piecesArray,
-      pieces_demandees: piecesArray,
-      devis_lignes: devisLignes,
-      notes: request.notesInternes || "",
-      notes_internes: request.notesInternes || "",
-      demande_complete: request.notesInternes || "",
-      statut: request.statut || "En attente",
-      devis_numero: request.devisNumero || request.devisArchiveComplet?.numero || "",
-      total_ttc: Number(totalTTC || 0),
-      created_by_login: request.createdByLogin || currentUser?.login || "",
-      created_by_name: request.createdByName || currentUser?.name || "",
-      created_at: request.createdAt || new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      updated_by: currentUser?.name || currentUser?.login || "system",
-      is_active: true,
-    };
-  }
-
     function dbDevisToApp(row) {
     const lignes = Array.isArray(row.lignes) ? row.lignes : [];
 
     return {
       id: row.id,
       numero: row.devis_numero || "",
-      cahierDemandeId: row.cahier_demande_id || "",
       client: row.client || "",
       telephone: row.telephone || "",
       date: row.date_devis || new Date().toISOString().slice(0, 10),
@@ -498,7 +367,7 @@ export default function App() {
       origineDemande: row.origine_demande || "",
       status: row.statut || "Archivé",
       lignes,
-      lignesCompletesCahier: Array.isArray(row.lignes_completes_cahier) ? row.lignes_completes_cahier : lignes,
+      lignesCompletes: lignes,
       sousTotalHT: Number(row.sous_total_ht || 0),
       sousTotalTTC: Number(row.sous_total_ttc || row.total_ttc || 0),
       remiseHT: Number(row.remise_ht || 0),
@@ -522,7 +391,6 @@ export default function App() {
       id: String(devisItem.id || Date.now()),
       legacy_id: devisItem.legacyId || null,
       devis_numero: devisItem.numero || nextDevisNumero(),
-      cahier_demande_id: devisItem.demandeId || devisItem.cahierDemandeId ? String(devisItem.demandeId || devisItem.cahierDemandeId) : null,
       client: devisItem.client || "",
       telephone: devisItem.telephone || "",
       date_devis: devisItem.date || new Date().toISOString().slice(0, 10),
@@ -532,7 +400,6 @@ export default function App() {
       vin: devisItem.vin || "",
       origine_demande: devisItem.origineDemande || "",
       lignes: devisItem.lignes || [],
-      lignes_completes_cahier: devisItem.lignesCompletesCahier || devisItem.lignes || [],
       total_ttc: Number(devisItem.totalTTC || 0),
       total_toutes_pieces_ttc: Number(devisItem.totalToutesPiecesTTC || devisItem.totalTTC || 0),
       total_valide_client_ttc: Number(devisItem.totalValideClientTTC || devisItem.totalTTC || 0),
@@ -545,21 +412,7 @@ export default function App() {
     };
   }
 
-    async function loadCahierFromDb() {
-    const { data, error } = await supabase
-      .from("cahier_demandes")
-      .select("*")
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      console.error("Chargement cahier_demandes impossible", error);
-      return null;
-    }
-
-    return (data || []).map(dbCahierToApp);
-  }
-
-  async function loadDevisFromDb() {
+    async function loadDevisFromDb() {
     const { data, error } = await supabase
       .from("devis")
       .select("*")
@@ -571,46 +424,6 @@ export default function App() {
     }
 
     return (data || []).map(dbDevisToApp);
-  }
-
-  async function insertCahierInDb(request) {
-    const payload = appCahierToDb(request);
-
-    const { error } = await supabase
-      .from("cahier_demandes")
-      .insert([payload]);
-
-    if (error) {
-      console.error("Supabase cahier_demandes INSERT error:", error);
-      throw error;
-    }
-
-    return dbCahierToApp(payload);
-  }
-
-    async function updateCahierInDb(id, request) {
-    const payload = appCahierToDb({ ...request, id });
-
-    const { error } = await supabase
-      .from("cahier_demandes")
-      .update(payload)
-      .eq("id", String(id));
-
-    if (error) {
-      console.error("Supabase cahier_demandes UPDATE error:", error);
-      throw error;
-    }
-
-    return dbCahierToApp(payload);
-  }
-
-    async function deleteCahierInDb(id) {
-    const { error } = await supabase
-      .from("cahier_demandes")
-      .delete()
-      .eq("id", String(id));
-
-    if (error) throw error;
   }
 
   async function insertDevisInDb(devisItem) {
@@ -1248,15 +1061,6 @@ export default function App() {
     if (error) throw error;
   }
 
-  async function reloadCahierDevisFromDb() {
-    const [dbCahier, dbDevis] = await Promise.all([loadCahierFromDb(), loadDevisFromDb()]);
-
-    if (dbCahier) setDevisRequests(dbCahier);
-    if (dbDevis) setDevis(dbDevis);
-
-    addHistory("Rechargement Cahier/Devis", "Cahier et Devis rechargés depuis les tables professionnelles");
-  }
-
   async function reloadStockFromDb() {
     const professionalStock = await loadStockItemsFromDb();
     if (professionalStock) {
@@ -1395,9 +1199,7 @@ export default function App() {
         setOrderedAutoIds(remoteState.orderedAutoIds || []);
         setOrderArchives(remoteState.orderArchives || []);
         const professionalDevis = await loadDevisFromDb();
-        const professionalCahier = await loadCahierFromDb();
         setDevis(Array.isArray(professionalDevis) ? professionalDevis : remoteState.devis || []);
-        setDevisRequests(Array.isArray(professionalCahier) ? professionalCahier : remoteState.devisRequests || []);
         const professionalClients = await loadClientsFromDb();
         setClients(Array.isArray(professionalClients) ? professionalClients : remoteState.clients || []);
 
@@ -1443,7 +1245,6 @@ export default function App() {
             orderedAutoIds: remoteState.orderedAutoIds || [],
             orderArchives: remoteState.orderArchives || [],
             devis: remoteState.devis || [],
-            devisRequests: remoteState.devisRequests || [],
             clients: remoteState.clients || [],
             savedAt: new Date().toISOString(),
           })
@@ -1462,8 +1263,7 @@ export default function App() {
             setOrderedAutoIds(data.orderedAutoIds || []);
             setOrderArchives(data.orderArchives || []);
             setDevis(data.devis || []);
-            setDevisRequests(data.devisRequests || []);
-            const professionalClients = await loadClientsFromDb();
+                const professionalClients = await loadClientsFromDb();
             setClients(Array.isArray(professionalClients) ? professionalClients : data.clients || []);
           } catch {
             localStorage.removeItem("king_app_full");
@@ -1488,7 +1288,6 @@ export default function App() {
       orderedAutoIds,
       orderArchives,
       devis,
-      devisRequests,
       clients,
       savedAt: new Date().toISOString(),
     };
@@ -1497,7 +1296,7 @@ export default function App() {
     saveAppState(payload).catch((error) => {
       console.error("Sauvegarde Supabase impossible", error);
     });
-  }, [appLoaded, users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, devisRequests, clients]);
+  }, [appLoaded, users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, clients]);
 
   useEffect(() => {
     if (selectedClient) {
@@ -1521,87 +1320,6 @@ export default function App() {
       return txt.includes(clientSearch.toLowerCase());
     });
   }, [clients, clientSearch]);
-
-  const devisRequestUsers = useMemo(() => {
-    const names = devisRequests.map((r) => r.createdByName || r.createdBy || "-").filter(Boolean);
-    return ["Tous", ...Array.from(new Set(names))];
-  }, [devisRequests]);
-
-  const filteredDevisRequests = useMemo(() => {
-    const q = devisRequestSearch.trim().toLowerCase();
-    return devisRequests.filter((request) => {
-      const text = `${request.client} ${request.telephone} ${request.whatsapp} ${request.plaque} ${request.vin} ${request.marque} ${request.modele} ${request.piecesDemandees} ${request.notesInternes} ${request.createdByName} ${request.createdByLogin}`.toLowerCase();
-      const matchesSearch = !q || text.includes(q);
-      const matchesType = devisRequestTypeFilter === "Tous" || request.type === devisRequestTypeFilter;
-      const ownerName = request.createdByName || request.createdBy || "-";
-      const matchesUser = devisRequestUserFilter === "Tous" || ownerName === devisRequestUserFilter;
-      return matchesSearch && matchesType && matchesUser;
-    });
-  }, [devisRequests, devisRequestSearch, devisRequestTypeFilter, devisRequestUserFilter]);
-
-  const matchingDevisHistory = useMemo(() => {
-    const plaque = String(devisRequestForm.plaque || devisForm.plaque || "").trim().toLowerCase();
-    const vin = String(devisRequestForm.vin || devisForm.vin || "").trim().toLowerCase();
-    const client = String(devisRequestForm.client || devisForm.client || "").trim().toLowerCase();
-    const telephone = String(devisRequestForm.telephone || devisForm.telephone || "").trim().toLowerCase();
-    if (!plaque && !vin && !client && !telephone) return [];
-    const allItems = [...devisRequests.map((item) => ({ ...item, sourceType: "Demande" })), ...devis.map((item) => ({ ...item, sourceType: "Devis" }))];
-    return allItems.filter((item) => {
-      const itemPlaque = String(item.plaque || "").trim().toLowerCase();
-      const itemVin = String(item.vin || "").trim().toLowerCase();
-      const itemClient = String(item.client || "").trim().toLowerCase();
-      const itemTel = String(item.telephone || item.whatsapp || "").trim().toLowerCase();
-      return (plaque && itemPlaque && itemPlaque.includes(plaque)) || (vin && itemVin && itemVin.includes(vin)) || (client && itemClient && itemClient.includes(client)) || (telephone && itemTel && itemTel.includes(telephone));
-    }).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,12);
-  }, [devisRequests, devis, devisRequestForm.plaque, devisRequestForm.vin, devisRequestForm.client, devisRequestForm.telephone, devisForm.plaque, devisForm.vin, devisForm.client, devisForm.telephone]);
-
-  const vehicleHistoryForRequest = useMemo(() => {
-    const plaque = String(devisRequestForm.plaque || "").trim().toLowerCase();
-    const vin = String(devisRequestForm.vin || "").trim().toLowerCase();
-
-    if (!plaque && !vin) return [];
-
-    const allItems = [
-      ...devisRequests.map((item) => ({ ...item, sourceType: "Demande" })),
-      ...devis.map((item) => ({ ...item, sourceType: "Devis" })),
-    ];
-
-    return allItems
-      .filter((item) => {
-        const itemPlaque = String(item.plaque || "").trim().toLowerCase();
-        const itemVin = String(item.vin || "").trim().toLowerCase();
-
-        return (
-          (plaque && itemPlaque && itemPlaque.includes(plaque)) ||
-          (vin && itemVin && itemVin.includes(vin))
-        );
-      })
-      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
-      .slice(0, 15);
-  }, [devisRequests, devis, devisRequestForm.plaque, devisRequestForm.vin]);
-
-  function getLineUnitPrice(line) {
-    if (line.deuxOffres && line.offreChoisie === "offre2") {
-      return Number(line.prixTTC2 || 0);
-    }
-
-    return Number(line.prixTTC || 0);
-  }
-
-  function getLineTotal(line) {
-    return Number(line.quantite || 0) * getLineUnitPrice(line);
-  }
-
-  const filteredDevis = useMemo(() => {
-    const q = devisSearch.trim().toLowerCase();
-
-    if (!q) return devis;
-
-    return devis.filter((d) => {
-      const text = `${d.numero} ${d.client} ${d.telephone} ${d.plaque} ${d.vin} ${d.marque} ${d.modele} ${d.createdBy}`.toLowerCase();
-      return text.includes(q);
-    });
-  }, [devis, devisSearch]);
 
   const stockACommanderAuto = pieces.filter(
     (p) => Number(p.quantite) < Number(p.rupture) && !orderedAutoIds.includes(p.id)
@@ -1627,10 +1345,7 @@ export default function App() {
 
   function nextDevisNumero() {
     const year = new Date().getFullYear();
-    const allNumbers = [
-      ...devis.map((d) => d.numero),
-      ...devisRequests.map((r) => r.devisNumero || r.devis?.numero),
-    ].filter(Boolean);
+    const allNumbers = devis.map((d) => d.numero).filter(Boolean);
 
     const currentYearNumbers = allNumbers
       .map((numero) => String(numero || ""))
@@ -1644,48 +1359,6 @@ export default function App() {
     const nextNumber = currentYearNumbers.length ? Math.max(...currentYearNumbers) + 1 : 1;
 
     return `DV-${year}-${String(nextNumber).padStart(5, "0")}`;
-  }
-
-  function nextCahierNumero() {
-    const login = currentUser?.login || "user";
-    const year = new Date().getFullYear();
-    const prefix = `CH-${login.toUpperCase()}-${year}`;
-
-    const userNumbers = devisRequests
-      .filter((request) => request.createdByLogin === login)
-      .map((request) => String(request.cahierNumero || ""))
-      .filter((numero) => numero.startsWith(prefix))
-      .map((numero) => Number(numero.split("-").pop() || 0))
-      .filter((n) => !Number.isNaN(n));
-
-    const nextNumber = userNumbers.length ? Math.max(...userNumbers) + 1 : 1;
-    return `${prefix}-${String(nextNumber).padStart(4, "0")}`;
-  }
-
-  async function nextCahierNumeroFromDb() {
-    const login = currentUser?.login || "user";
-    const year = new Date().getFullYear();
-    const prefix = `CH-${login.toUpperCase()}-${year}`;
-
-    const { data, error } = await supabase
-      .from("cahier_demandes")
-      .select("cahier_numero")
-      .eq("created_by_login", login)
-      .ilike("cahier_numero", `${prefix}-%`);
-
-    if (error) {
-      console.warn("Numéro Cahier DB impossible, fallback local", error);
-      return nextCahierNumero();
-    }
-
-    const numbers = (data || [])
-      .map((row) => String(row.cahier_numero || ""))
-      .filter((numero) => numero.startsWith(prefix))
-      .map((numero) => Number(numero.split("-").pop() || 0))
-      .filter((n) => !Number.isNaN(n));
-
-    const nextNumber = numbers.length ? Math.max(...numbers) + 1 : 1;
-    return `${prefix}-${String(nextNumber).padStart(4, "0")}`;
   }
 
   function addHistory(action, details) {
@@ -2218,704 +1891,6 @@ export default function App() {
     setDevisStockSelection([]);
   }
 
-  function parseRequestedPieces(value) {
-    return String(value || "")
-      .split("\n")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  function addRequestedPiece() {
-    const piece = requestPieceInput.trim();
-    if (!piece) return;
-
-    const currentPieces = parseRequestedPieces(devisRequestForm.piecesDemandees);
-    setDevisRequestForm({
-      ...devisRequestForm,
-      piecesDemandees: [...currentPieces, piece].join("\n"),
-    });
-    setRequestPieceInput("");
-  }
-
-  function removeRequestedPiece(index) {
-    const currentPieces = parseRequestedPieces(devisRequestForm.piecesDemandees);
-    const nextPieces = currentPieces.filter((_, i) => i !== index);
-
-    setDevisRequestForm({
-      ...devisRequestForm,
-      piecesDemandees: nextPieces.join("\n"),
-    });
-  }
-
-  function changeDevisRequestForm(e) {
-    setDevisRequestForm({ ...devisRequestForm, [e.target.name]: e.target.value });
-  }
-
-  function resetDevisRequestForm() {
-    setEditingDevisRequestId(null);
-    setRequestPieceInput("");
-    setDevisRequestForm({
-      type: "Sur place",
-      statut: "En attente",
-      client: "",
-      telephone: "",
-      whatsapp: "",
-      clientType: "Particulier",
-      plaque: "",
-      vin: "",
-      marque: "",
-      modele: "",
-      piecesDemandees: "",
-      notesInternes: "",
-      });
-  }
-
-  async function saveDevisRequest(e) {
-    e.preventDefault();
-
-    if (!devisRequestForm.client && !devisRequestForm.plaque && !devisRequestForm.vin) {
-      return alert("Ajoute au minimum un nom client, une plaque ou un VIN.");
-    }
-
-    const old = devisRequests.find((request) => request.id === editingDevisRequestId);
-    const cahierNumero = old?.cahierNumero || await nextCahierNumeroFromDb();
-
-    const requestPayload = {
-      id: editingDevisRequestId || String(Date.now()),
-      cahierNumero,
-      ...devisRequestForm,
-      statut: devisRequestForm.statut || "En attente",
-      createdByLogin: old?.createdByLogin || currentUser?.login || "",
-      createdByName: old?.createdByName || currentUser?.name || "",
-      createdAt: old?.createdAt || new Date().toLocaleString("fr-FR"),
-      updatedAt: new Date().toLocaleString("fr-FR"),
-      updatedBy: currentUser?.name || currentUser?.login || "",
-    };
-
-    try {
-      let savedRequest;
-
-      if (editingDevisRequestId) {
-        savedRequest = await updateCahierInDb(editingDevisRequestId, requestPayload);
-        addHistory("Modification demande Cahier", `${savedRequest.cahierNumero} — ${savedRequest.client || "-"}`);
-      } else {
-        savedRequest = await insertCahierInDb(requestPayload);
-        addHistory("Nouvelle demande Cahier", `${savedRequest.cahierNumero} — ${savedRequest.client || "-"}`);
-      }
-
-      const freshCahier = await loadCahierFromDb();
-      if (freshCahier) {
-        setDevisRequests(freshCahier);
-      } else if (editingDevisRequestId) {
-        setDevisRequests(devisRequests.map((request) => (request.id === editingDevisRequestId ? savedRequest : request)));
-      } else {
-        setDevisRequests([savedRequest, ...devisRequests]);
-      }
-
-      resetDevisRequestForm();
-      alert("Demande Cahier enregistrée.");
-    } catch (error) {
-      console.error("Erreur cahier_demandes", error);
-      alert("Erreur Supabase : impossible d'enregistrer la demande Cahier. Détail : " + (error?.message || "voir console"));
-    }
-  }
-
-  function editDevisRequest(request) {
-    setEditingDevisRequestId(request.id);
-    setRequestPieceInput("");
-    setDevisRequestForm({
-      type: request.type || "Sur place",
-      statut: request.statut || "À traiter",
-      client: request.client || "",
-      telephone: request.telephone || "",
-      whatsapp: request.whatsapp || "",
-      clientType: request.clientType || "Particulier",
-      plaque: request.plaque || "",
-      vin: request.vin || "",
-      marque: request.marque || "",
-      modele: request.modele || "",
-      piecesDemandees: request.piecesDemandees || "",
-      notesInternes: request.notesInternes || "",
-    });
-    setSelectedDevisRequest(null);
-    setModuleActif("Devis");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  async function deleteDevisRequest(id) {
-    const request = devisRequests.find((item) => item.id === id);
-    if (!request) return;
-
-    if (!window.confirm(`Supprimer la demande Cahier ${request.cahierNumero || ""} ?`)) return;
-
-    try {
-      await deleteCahierInDb(id);
-      setDevisRequests(devisRequests.filter((item) => item.id !== id));
-      addHistory("Suppression demande Cahier", `${request.cahierNumero || "-"} — ${request.client || "-"}`);
-      setSelectedDevisRequest(null);
-    } catch (error) {
-      console.error("Erreur suppression cahier_demandes", error);
-      alert("Erreur Supabase : impossible de supprimer la demande.");
-    }
-  }
-
-  async function changeDevisRequestStatus(id, statut) {
-    const request = devisRequests.find((item) => item.id === id);
-    if (!request) return;
-
-    const updatedRequestPayload = {
-      ...request,
-      statut,
-      updatedAt: new Date().toLocaleString("fr-FR"),
-      updatedBy: currentUser?.name || "",
-    };
-
-    try {
-      const savedRequest = await updateCahierInDb(id, updatedRequestPayload);
-      setDevisRequests(devisRequests.map((item) => (item.id === id ? savedRequest : item)));
-      addHistory("Statut Cahier modifié", `${savedRequest.cahierNumero || "-"} — ${statut}`);
-    } catch (error) {
-      console.error("Erreur statut cahier_demandes", error);
-      alert("Erreur Supabase : statut non modifié.");
-    }
-  }
-
-  function createDevisFromRequest(request) {
-    const requestedPieces = parseRequestedPieces(request.piecesDemandees);
-    const existingDevis = request.devis || null;
-
-    setDevisForm({
-      numero: existingDevis?.numero || devisForm.numero || nextDevisNumero(),
-      client: existingDevis?.client || request.client || "",
-      date: existingDevis?.date || new Date().toISOString().slice(0, 10),
-      marque: existingDevis?.marque || request.marque || "",
-      modele: existingDevis?.modele || request.modele || "",
-      plaque: existingDevis?.plaque || request.plaque || "",
-      vin: existingDevis?.vin || request.vin || "",
-      telephone: existingDevis?.telephone || request.telephone || request.whatsapp || "",
-      origineDemande: existingDevis?.origineDemande || request.type || "",
-      demandeId: request.id,
-      notesInternes: existingDevis?.notesInternes || request.notesInternes || "",
-      remiseType: existingDevis?.remiseType || "pourcentage",
-      remiseValue: existingDevis?.remiseValue || "",
-    });
-
-    if (existingDevis?.lignes?.length) {
-      setDevisLines(existingDevis.lignes);
-    } else {
-      setDevisLines(
-        requestedPieces.map((piece, index) => ({
-          id: Date.now() + index,
-          designation: piece,
-          reference: "",
-          quantite: 1,
-          prixTTC: "",
-          priceType: "demande",
-          sourceRequestId: request.id,
-          confirmedByClient: false,
-          confirmedByClient: false,
-        }))
-      );
-    }
-
-    setDevisLine({ designation: "", reference: "", quantite: "1", prixTTC: "", deuxOffres: false, fournisseur1: "", dateDispo1: "Sur place", reference2: "", prixTTC2: "", fournisseur2: "", dateDispo2: "", offreChoisie: "offre1" });
-    setSelectedDevisRequest(null);
-    setModuleActif("Devis");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-
-    addHistory(
-      existingDevis ? "Réouverture devis depuis Cahier" : "Demande ouverte dans devis",
-      `${request.client || "-"} — ${requestedPieces.length} pièce(s)`
-    );
-  }
-
-  function printDevisRequest(request) {
-    const pieces = String(request.piecesDemandees || "-").replace(/\n/g, "<br/>");
-    const notes = String(request.notesInternes || "-").replace(/\n/g, "<br/>");
-    const archivedLines = request.devisArchiveComplet?.lignes || request.devisLignes || [];
-    const archivedRows = archivedLines
-      .map(
-        (line, index) => `
-          <tr>
-            <td>${index + 1}</td>
-            <td>${line.designation || "-"}</td>
-            <td>${line.reference || "-"}</td>
-            <td>${line.quantite || 1}</td>
-            <td>${Number(line.prixFinalTTC || line.prixTTC || 0).toFixed(2)} €</td>
-            <td>${Number(line.totalFinalTTC || (Number(line.quantite || 0) * Number(line.prixFinalTTC || line.prixTTC || 0))).toFixed(2)} €</td>
-            <td>${line.validationClient || (line.confirmedByClient ? "Validé par le client" : "Non validé par le client")}</td>
-          </tr>
-        `
-      )
-      .join("");
-
-    const win = window.open("", "_blank");
-
-    win.document.write(`
-      <html>
-        <head>
-          <title>Demande devis - ${request.client || ""}</title>
-          <style>
-            @page { size: A4; margin: 14mm; }
-            body { font-family: Arial, sans-serif; color: #10234d; margin: 0; background: #fff; }
-            .page { min-height: calc(297mm - 28mm); display: flex; flex-direction: column; }
-            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #123f8f; padding-bottom: 12px; margin-bottom: 16px; }
-            .brand { display: flex; align-items: center; gap: 12px; }
-            .brand img { width: 72px; height: 72px; object-fit: contain; }
-            h1 { margin: 0; color: #123f8f; font-size: 21px; }
-            h2 { margin: 0; color: #123f8f; font-size: 24px; text-align: right; }
-            h3 { color: #123f8f; margin: 0 0 8px; }
-            p { margin: 4px 0; font-size: 12px; }
-            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-            .box { border: 1px solid #d9e3f2; border-radius: 10px; padding: 10px; margin-bottom: 12px; page-break-inside: avoid; }
-            .footer { margin-top: auto; border-top: 2px solid #123f8f; padding-top: 8px; text-align: center; font-size: 10px; color: #555; line-height: 1.5; page-break-inside: avoid; }
-            @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
-          </style>
-        </head>
-        <body>
-          <div class="page">
-            <div class="header">
-              <div class="brand">
-                <img src="${logo}" />
-                <div>
-                  <h1>${ENTREPRISE.nom}</h1>
-                  <p>📍 ${ENTREPRISE.adresse}</p>
-                  <p>📧 ${ENTREPRISE.email}</p>
-                  <p>☎ ${ENTREPRISE.telephone} — WhatsApp ${ENTREPRISE.whatsapp}</p>
-                </div>
-              </div>
-              <div>
-                <h2>DEMANDE DEVIS</h2>
-                <p><strong>Date :</strong> ${request.createdAt || ""}</p>
-                <p><strong>Statut :</strong> ${request.statut || ""}</p>
-              </div>
-            </div>
-
-            <div class="grid">
-              <div class="box">
-                <h3>Client</h3>
-                <p><strong>Nom :</strong> ${request.client || "-"}</p>
-                <p><strong>Téléphone :</strong> ${request.telephone || "-"}</p>
-                <p><strong>WhatsApp :</strong> ${request.whatsapp || "-"}</p>
-                <p><strong>Type client :</strong> ${request.clientType || "-"}</p>
-              </div>
-
-              <div class="box">
-                <h3>Véhicule</h3>
-                <p><strong>Plaque :</strong> ${request.plaque || "-"}</p>
-                <p><strong>VIN :</strong> ${request.vin || "-"}</p>
-                <p><strong>Marque :</strong> ${request.marque || "-"}</p>
-                <p><strong>Modèle :</strong> ${request.modele || "-"}</p>
-              </div>
-            </div>
-
-            <div class="box">
-              <h3>Demande</h3>
-              <p><strong>Origine :</strong> ${request.type || "-"}</p>
-              <p><strong>Salarié :</strong> ${request.createdByName || "-"}</p>
-              <p><strong>Pièces demandées :</strong></p>
-              <p>${pieces}</p>
-            </div>
-
-            ${
-              archivedRows
-                ? `
-                  <div class="box">
-                    <h3>Devis archivé complet</h3>
-                    <table style="width:100%; border-collapse:collapse; margin-top:10px;">
-                      <thead>
-                        <tr>
-                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">N°</th>
-                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Pièce</th>
-                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Référence</th>
-                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Qté</th>
-                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Prix</th>
-                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Total</th>
-                          <th style="background:#123f8f;color:white;padding:7px;text-align:left;">Validation</th>
-                        </tr>
-                      </thead>
-                      <tbody>${archivedRows}</tbody>
-                    </table>
-                  </div>
-                `
-                : ""
-            }
-
-            <div class="box">
-              <h3>Notes internes</h3>
-              <p>${notes}</p>
-            </div>
-
-            <div class="footer">
-              ${ENTREPRISE.nom} — ${ENTREPRISE.adresse}<br/>
-              Email : ${ENTREPRISE.email} — Téléphone : ${ENTREPRISE.telephone} — WhatsApp : ${ENTREPRISE.whatsapp}<br/>
-              TVA : ${ENTREPRISE.tva}
-            </div>
-          </div>
-
-          <script>window.print();</script>
-        </body>
-      </html>
-    `);
-
-    win.document.close();
-
-    addHistory("Impression demande devis", `${request.client || "-"} — ${request.plaque || request.vin || "-"}`);
-  }
-
-  function openStockSearchForDevisLine(line) {
-    setDevisStockSearchLineId(line.id);
-    setDevisStockSearchText(line.reference || line.designation || "");
-  }
-
-  function closeStockSearchForDevisLine() {
-    setDevisStockSearchLineId(null);
-    setDevisStockSearchText("");
-  }
-
-  function getStockSearchResultsForDevisLine() {
-    const q = normalizeTextForMatch(devisStockSearchText);
-    if (!q) return [];
-
-    return pieces
-      .filter((piece) => {
-        const text = normalizeTextForMatch(
-          `${piece.designation} ${piece.refInterne} ${piece.refOrigine} ${piece.famille} ${piece.sousFamille} ${piece.fournisseur}`
-        );
-        return text.includes(q);
-      })
-      .slice(0, 12);
-  }
-
-  async function decreaseStockFromDevisLine(line) {
-    if (!line.sourceStockId) {
-      return alert("Cette ligne n'est pas liée à une pièce du stock.");
-    }
-
-    const piece = pieces.find((p) => p.id === line.sourceStockId);
-    if (!piece) return alert("Pièce stock introuvable.");
-
-    const qty = Number(line.quantite || 1);
-    const nextQuantity = Math.max(0, Number(piece.quantite || 0) - qty);
-
-    if (!window.confirm(`Retirer ${qty} pièce(s) du stock pour : ${piece.designation} ?`)) return;
-
-    try {
-      const updatedPiece = await updateStockQuantityInDb(piece.id, nextQuantity);
-
-      setPieces((prevPieces) => prevPieces.map((p) => (p.id === piece.id ? updatedPiece : p)));
-
-      setDevisLines((prevLines) =>
-        prevLines.map((l) =>
-          l.id === line.id
-            ? {
-                ...l,
-                stockRetire: true,
-                stockRetireAt: new Date().toLocaleString("fr-FR"),
-                stockRetireBy: currentUser?.name || "-",
-              }
-            : l
-        )
-      );
-
-      addHistory("Stock retiré depuis devis", `${piece.designation} — quantité ${qty}`);
-    } catch (error) {
-      console.error("Erreur retrait stock devis", error);
-      alert("Erreur Supabase : stock non retiré.");
-    }
-  }
-
-  function applyStockPieceToDevisLine(lineId, piece, priceType) {
-    const prixChoisi =
-      priceType === "pro"
-        ? Number(piece.prixPro || piece.prixPart || 0)
-        : Number(piece.prixPart || piece.prixPro || 0);
-
-    setDevisLines((prev) =>
-      prev.map((line) =>
-        line.id === lineId
-          ? {
-              ...line,
-              reference: piece.refInterne || piece.refOrigine || "",
-              prixTTC: prixChoisi,
-              priceType,
-              sourceStockId: piece.id,
-              stockDesignation: piece.designation,
-            }
-          : line
-      )
-    );
-
-    addHistory(
-      "Pièce stock sélectionnée dans devis",
-      `${piece.designation} — tarif ${priceType === "pro" ? "professionnel" : "particulier"}`
-    );
-
-    closeStockSearchForDevisLine();
-  }
-
-  function getAllSavedDevisForArchives() {
-    const cahierDevis = devisRequests
-      .filter((request) => request.devis)
-      .map((request) => ({
-        ...request.devis,
-        fromCahier: true,
-        cahierRequestId: request.id,
-        cahierClient: request.client,
-        cahierStatut: request.statut,
-        createdAt: request.devis?.createdAt || request.updatedAt || request.createdAt,
-        updatedAt: request.updatedAt,
-      }));
-
-    return [...devis, ...cahierDevis].sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
-  }
-
-  function getDevisArchiveByDate(dateValue) {
-    if (!dateValue) return [];
-
-    return getAllSavedDevisForArchives().filter((d) => {
-      const dDate = d.date || "";
-      const created = String(d.createdAt || "");
-      return dDate === dateValue || created.includes(new Date(dateValue).toLocaleDateString("fr-FR"));
-    });
-  }
-
-  function getDevisArchiveByMonth(monthValue) {
-    if (!monthValue) return [];
-
-    return getAllSavedDevisForArchives().filter((d) => {
-      const dDate = d.date || "";
-      return dDate.startsWith(monthValue);
-    });
-  }
-
-  function toggleDevisSoldLine(lineId) {
-    setDevisSoldSelection((prev) => ({
-      ...prev,
-      [lineId]: !prev[lineId],
-    }));
-  }
-
-  function selectAllStockLinesForSale() {
-    const next = {};
-    devisLines.forEach((line) => {
-      if (line.sourceStockId) next[line.id] = true;
-    });
-    setDevisSoldSelection(next);
-  }
-
-  function clearSoldLineSelection() {
-    setDevisSoldSelection({});
-  }
-
-  function getSelectedSoldLines() {
-    return devisLines.filter((line) => devisSoldSelection[line.id]);
-  }
-
-  function applySoldLinesToStock() {
-    const selectedLines = getSelectedSoldLines();
-
-    if (selectedLines.length === 0) {
-      return alert("Sélectionne au moins une pièce vendue à retirer du stock.");
-    }
-
-    const stockLinkedLines = selectedLines.filter((line) => line.sourceStockId);
-
-    if (stockLinkedLines.length === 0) {
-      return alert("Les lignes sélectionnées ne viennent pas du stock, donc aucun stock à retirer.");
-    }
-
-    setPieces((prevPieces) =>
-      prevPieces.map((piece) => {
-        const totalSoldForPiece = stockLinkedLines
-          .filter((line) => line.sourceStockId === piece.id)
-          .reduce((sum, line) => sum + Number(line.quantite || 0), 0);
-
-        if (totalSoldForPiece <= 0) return piece;
-
-        return {
-          ...piece,
-          quantite: Math.max(0, Number(piece.quantite || 0) - totalSoldForPiece),
-          updatedAt: new Date().toLocaleString("fr-FR"),
-          updatedBy: currentUser?.name || "-",
-        };
-      })
-    );
-
-    addHistory(
-      "Retrait stock depuis devis",
-      `${stockLinkedLines.length} ligne(s) — ${stockLinkedLines.reduce((sum, line) => sum + Number(line.quantite || 0), 0)} pièce(s)`
-    );
-
-    setDevisLines((prevLines) =>
-      prevLines.map((line) =>
-        devisSoldSelection[line.id]
-          ? {
-              ...line,
-              soldFromDevis: Boolean(line.sourceStockId),
-              soldAt: new Date().toLocaleString("fr-FR"),
-              soldBy: currentUser?.name || "-",
-            }
-          : line
-      )
-    );
-
-    setDevisSoldSelection({});
-    alert("Stock retiré pour les pièces sélectionnées.");
-  }
-
-  function saveAndApplySoldLines(status = "Archivé") {
-    applySoldLinesToStock();
-    saveDevis(status);
-  }
-
-  function printDevisArchiveList(list, title) {
-    const rows = (list || [])
-      .map(
-        (d, i) => `
-          <tr>
-            <td>${i + 1}</td>
-            <td>${d.numero || "-"}</td>
-            <td>${d.client || "-"}</td>
-            <td>${d.plaque || "-"}</td>
-            <td>${d.vin || "-"}</td>
-            <td>${d.date || "-"}</td>
-            <td>${Number(d.totalTTC || 0).toFixed(2)} €</td>
-            <td>${d.fromCahier ? "Cahier" : "Devis"}</td>
-          </tr>
-        `
-      )
-      .join("");
-
-    const total = (list || []).reduce((sum, d) => sum + Number(d.totalTTC || 0), 0);
-
-    const win = window.open("", "_blank");
-
-    win.document.write(`
-      <html>
-        <head>
-          <title>${title}</title>
-          <style>
-            @page { size: A4; margin: 14mm; }
-            body { font-family: Arial, sans-serif; color: #10234d; margin: 0; }
-            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #123f8f; padding-bottom: 12px; margin-bottom: 16px; }
-            .brand { display: flex; align-items: center; gap: 12px; }
-            .brand img { width: 70px; height: 70px; object-fit: contain; }
-            h1 { margin: 0; color: #123f8f; font-size: 20px; }
-            h2 { margin: 0; color: #123f8f; font-size: 22px; text-align: right; }
-            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-            th { background: #123f8f; color: white; padding: 8px; text-align: left; font-size: 11px; }
-            td { border: 1px solid #d9e3f2; padding: 7px; font-size: 11px; }
-            .total { margin-top: 18px; margin-left: auto; width: 280px; background: #000; color: white; padding: 12px; font-weight: bold; display: flex; justify-content: space-between; border-radius: 10px; }
-            .footer { margin-top: 24px; border-top: 2px solid #123f8f; padding-top: 8px; text-align: center; font-size: 10px; color: #555; line-height: 1.5; }
-            @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="brand">
-              <img src="${logo}" />
-              <div>
-                <h1>${ENTREPRISE.nom}</h1>
-                <p>📍 ${ENTREPRISE.adresse}</p>
-                <p>📧 ${ENTREPRISE.email}</p>
-              </div>
-            </div>
-            <div>
-              <h2>${title}</h2>
-              <p>Date impression : ${new Date().toLocaleString("fr-FR")}</p>
-            </div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th>N°</th><th>Devis</th><th>Client</th><th>Plaque</th><th>VIN</th><th>Date</th><th>Total TTC</th><th>Source</th>
-              </tr>
-            </thead>
-            <tbody>${rows || `<tr><td colspan="8">Aucun devis.</td></tr>`}</tbody>
-          </table>
-
-          <div class="total"><span>Total TTC</span><span>${total.toFixed(2)} €</span></div>
-
-          <div class="footer">
-            ${ENTREPRISE.nom} — ${ENTREPRISE.adresse}<br/>
-            Email : ${ENTREPRISE.email} — Téléphone : ${ENTREPRISE.telephone} — WhatsApp : ${ENTREPRISE.whatsapp}<br/>
-            TVA : ${ENTREPRISE.tva}
-          </div>
-
-          <script>window.print();</script>
-        </body>
-      </html>
-    `);
-
-    win.document.close();
-    addHistory("Impression archive devis", `${title} — ${list.length} devis`);
-  }
-
-  function toggleLineConfirmedByClient(lineId) {
-    setDevisLines((prev) =>
-      prev.map((line) =>
-        line.id === lineId
-          ? { ...line, confirmedByClient: !line.confirmedByClient }
-          : line
-      )
-    );
-  }
-
-  function selectAllLinesConfirmedByClient() {
-    setDevisLines((prev) => prev.map((line) => ({ ...line, confirmedByClient: true })));
-  }
-
-  function clearLinesConfirmedByClient() {
-    setDevisLines((prev) => prev.map((line) => ({ ...line, confirmedByClient: false })));
-  }
-
-  function getDevisLinesWithValidationNotes() {
-    return devisLines.map((line) => ({
-      ...line,
-      validationClient: line.confirmedByClient ? "Validé par le client" : "Non validé par le client",
-    }));
-  }
-
-  async function removeConfirmedStockLinesFromStock() {
-    const confirmedStockLines = devisLines.filter((line) => line.confirmedByClient && line.sourceStockId);
-
-    if (confirmedStockLines.length === 0) return;
-
-    const updates = [];
-
-    for (const piece of pieces) {
-      const totalSold = confirmedStockLines
-        .filter((line) => line.sourceStockId === piece.id)
-        .reduce((sum, line) => sum + Number(line.quantite || 0), 0);
-
-      if (totalSold > 0) {
-        const nextQuantity = Math.max(0, Number(piece.quantite || 0) - totalSold);
-        updates.push(updateStockQuantityInDb(piece.id, nextQuantity));
-      }
-    }
-
-    try {
-      const updatedPieces = await Promise.all(updates);
-
-      setPieces((prevPieces) =>
-        prevPieces.map((piece) => {
-          const updated = updatedPieces.find((p) => p.id === piece.id);
-          return updated || piece;
-        })
-      );
-
-      addHistory(
-        "Retrait stock devis validé",
-        `${confirmedStockLines.length} ligne(s) validée(s) par le client`
-      );
-    } catch (error) {
-      console.error("Erreur retrait stock devis validé", error);
-      alert("Erreur Supabase : certaines quantités stock n'ont pas été mises à jour.");
-    }
-  }
-
   function changeDevisForm(e) {
     setDevisForm({ ...devisForm, [e.target.name]: e.target.value });
   }
@@ -3045,7 +2020,6 @@ export default function App() {
       vin: "",
       telephone: "",
       origineDemande: "",
-      demandeId: "",
       notesInternes: "",
       remiseType: "pourcentage",
       remiseValue: "",
@@ -3060,7 +2034,7 @@ export default function App() {
 
     const numero = devisForm.numero || nextDevisNumero();
 
-    const allLinesForCahier = devisLines.map((line) => {
+    const allDevisLines = devisLines.map((line) => {
       const unitPrice =
         line.deuxOffres && line.offreChoisie === "offre2"
           ? Number(line.prixTTC2 || 0)
@@ -3074,7 +2048,7 @@ export default function App() {
       };
     });
 
-    const confirmedLinesForDevis = allLinesForCahier.filter((line) => line.confirmedByClient);
+    const confirmedLinesForDevis = allDevisLines.filter((line) => line.confirmedByClient);
 
     if (confirmedLinesForDevis.length === 0) {
       return alert("Coche au moins une pièce validée par le client avant de valider le devis.");
@@ -3083,15 +2057,13 @@ export default function App() {
     const totalConfirmedTTC = confirmedLinesForDevis.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
     const totalConfirmedHT = totalConfirmedTTC / 1.2;
     const tvaConfirmed = totalConfirmedTTC - totalConfirmedHT;
-    const totalAllTTC = allLinesForCahier.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
+    const totalAllTTC = allDevisLines.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
 
     const savedDevisPayload = {
       id: editingDevisId || Date.now(),
       ...devisForm,
       numero,
-      cahierDemandeId: devisForm.demandeId || devisForm.cahierDemandeId || "",
       lignes: confirmedLinesForDevis,
-      lignesCompletesCahier: allLinesForCahier,
       sousTotalHT: totalConfirmedHT,
       sousTotalTTC: totalConfirmedTTC,
       remiseHT: 0,
@@ -3099,7 +2071,6 @@ export default function App() {
       totalHT: totalConfirmedHT,
       tva: tvaConfirmed,
       totalTTC: totalConfirmedTTC,
-      totalToutesPiecesTTC: totalAllTTC,
       totalValideClientTTC: totalConfirmedTTC,
       status: "Archivé",
       createdBy: currentUser?.name || "-",
@@ -3124,44 +2095,7 @@ export default function App() {
         addHistory("Devis validé", `${numero} — ${devisForm.client}`);
       }
 
-      if (devisForm.demandeId) {
-        const request = devisRequests.find((item) => item.id === devisForm.demandeId);
 
-        if (request) {
-          const requestPayload = {
-            ...request,
-            statut: "Devis traité",
-            client: devisForm.client || request.client || "",
-            telephone: devisForm.telephone || request.telephone || "",
-            plaque: devisForm.plaque || request.plaque || "",
-            vin: devisForm.vin || request.vin || "",
-            marque: devisForm.marque || request.marque || "",
-            modele: devisForm.modele || request.modele || "",
-            piecesDemandees: allLinesForCahier.map((line) => line.designation).join("\n"),
-            devisNumero: numero,
-            devisLignes: allLinesForCahier,
-            devisArchiveComplet: {
-              numero,
-              lignes: allLinesForCahier,
-              totalToutesPiecesTTC: totalAllTTC,
-              totalPiecesValideesTTC: totalConfirmedTTC,
-              archivedAt: new Date().toLocaleString("fr-FR"),
-              archivedBy: currentUser?.name || "-",
-            },
-            devisTotalTTC: totalConfirmedTTC,
-            devisTotalToutesPiecesTTC: totalAllTTC,
-            devisTotalValideTTC: totalConfirmedTTC,
-            notesInternes:
-              `${request.notesInternes || ""}\n\nDevis ${numero} archivé : total toutes pièces ${totalAllTTC.toFixed(2)} €, total validé ${totalConfirmedTTC.toFixed(2)} €`.trim(),
-            updatedAt: new Date().toLocaleString("fr-FR"),
-            updatedBy: currentUser?.name || "",
-          };
-
-          const savedRequest = await updateCahierInDb(devisForm.demandeId, requestPayload);
-          setDevisRequests(devisRequests.map((item) => (item.id === devisForm.demandeId ? savedRequest : item)));
-          addHistory("Cahier mis à jour avec devis", `${savedRequest.cahierNumero || "-"} — ${numero}`);
-        }
-      }
 
       resetDevisDraft();
     } catch (error) {
@@ -4329,7 +3263,7 @@ export default function App() {
   }
 
   function exportBackup() {
-    const data = JSON.stringify({ users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, devisRequests, clients, date: new Date().toLocaleString("fr-FR") }, null, 2);
+    const data = JSON.stringify({ users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, clients, date: new Date().toLocaleString("fr-FR") }, null, 2);
     const blob = new Blob([data], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -4351,7 +3285,6 @@ export default function App() {
         setOrderedAutoIds(data.orderedAutoIds || []);
         setOrderArchives(data.orderArchives || []);
         setDevis(data.devis || []);
-        setDevisRequests(data.devisRequests || []);
         setClients(data.clients || []);
         alert("Sauvegarde restaurée avec succès.");
       } catch {
@@ -4768,247 +3701,6 @@ export default function App() {
           </>
         )}
 
-        {moduleActif === "Cahier" && (
-          <>
-            <section className="stats">
-              <div><span>Demandes cahier</span><strong>{devisRequests.length}</strong></div>
-              <div><span>En attente</span><strong>{devisRequests.filter((d) => d.statut === "En attente").length}</strong></div>
-              <div><span>Devis traités</span><strong>{devisRequests.filter((d) => d.statut === "Devis traité").length}</strong></div>
-              <div>
-                <span>Taux traité</span>
-                <strong>
-                  {devisRequests.length
-                    ? Math.round((devisRequests.filter((d) => d.statut === "Devis traité").length * 100) / devisRequests.length) + "%"
-                    : "0%"}
-                </strong>
-              </div>
-            </section>
-
-            <section className="panel stockPanel">
-              <div className="panelTitle">
-                <span>01</span>
-                <div>
-                  <h3>{editingDevisRequestId ? "Modifier une demande" : "Nouvelle demande client"}</h3>
-                  <p>Sur place, téléphone ou WhatsApp. Tu tapes la plaque ou le VIN : l’historique de cette voiture s’affiche directement.</p>
-                </div>
-              </div>
-
-              <form className="form" onSubmit={saveDevisRequest}>
-                <select name="type" value={devisRequestForm.type} onChange={changeDevisRequestForm}>
-                  <option>Sur place</option>
-                  <option>Téléphone</option>
-                  <option>WhatsApp</option>
-                </select>
-
-                <select name="statut" value={devisRequestForm.statut} onChange={changeDevisRequestForm}>
-                  <option>En attente</option>
-                  <option>Devis traité</option>
-                </select>
-
-                <input name="client" value={devisRequestForm.client} onChange={changeDevisRequestForm} placeholder="Nom client / société" />
-                <input name="telephone" value={devisRequestForm.telephone} onChange={changeDevisRequestForm} placeholder="Téléphone" />
-                <input name="whatsapp" value={devisRequestForm.whatsapp} onChange={changeDevisRequestForm} placeholder="WhatsApp" />
-
-                <select name="clientType" value={devisRequestForm.clientType} onChange={changeDevisRequestForm}>
-                  <option>Particulier</option>
-                  <option>Professionnel</option>
-                </select>
-
-                <input name="plaque" value={devisRequestForm.plaque} onChange={changeDevisRequestForm} placeholder="Plaque immatriculation" />
-                <input name="vin" value={devisRequestForm.vin} onChange={changeDevisRequestForm} placeholder="VIN / numéro de châssis" />
-                <input name="marque" value={devisRequestForm.marque} onChange={changeDevisRequestForm} placeholder="Marque" />
-                <input name="modele" value={devisRequestForm.modele} onChange={changeDevisRequestForm} placeholder="Modèle" />
-
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <div className="form" style={{ gridTemplateColumns: "1fr auto", marginBottom: "12px" }}>
-                    <input
-                      value={requestPieceInput}
-                      onChange={(e) => setRequestPieceInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addRequestedPiece();
-                        }
-                      }}
-                      placeholder="Écris une pièce demandée puis clique Ajouter pièce"
-                    />
-                    <button type="button" onClick={addRequestedPiece}>Ajouter pièce</button>
-                  </div>
-
-                  {parseRequestedPieces(devisRequestForm.piecesDemandees).length === 0 && (
-                    <div className="empty">Aucune pièce demandée ajoutée.</div>
-                  )}
-
-                  {parseRequestedPieces(devisRequestForm.piecesDemandees).length > 0 && (
-                    <div className="historyList">
-                      {parseRequestedPieces(devisRequestForm.piecesDemandees).map((piece, index) => (
-                        <div className="historyItem" key={`${piece}-${index}`}>
-                          <strong>{index + 1}. {piece}</strong>
-                          <div className="actions" style={{ marginTop: "8px" }}>
-                            <button type="button" className="delete" onClick={() => removeRequestedPiece(index)}>Retirer</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <textarea
-                  name="notesInternes"
-                  value={devisRequestForm.notesInternes}
-                  onChange={changeDevisRequestForm}
-                  placeholder="Demande complète du client + notes internes : modèle, rappel, fournisseur, remarque prix..."
-                  style={{ minHeight: "95px", gridColumn: "1 / -1", border: "1px solid #bfd4ff", borderRadius: "15px", padding: "12px", fontFamily: "inherit" }}
-                />
-
-                <button>{editingDevisRequestId ? "Enregistrer modification" : "Enregistrer demande en attente"}</button>
-
-                {editingDevisRequestId && (
-                  <button type="button" className="delete" onClick={resetDevisRequestForm}>Annuler modification</button>
-                )}
-              </form>
-            </section>
-
-            {vehicleHistoryForRequest.length > 0 && (
-              <section className="panel stockPanel">
-                <div className="panelTitle">
-                  <span>02</span>
-                  <div>
-                    <h3>Historique de cette voiture</h3>
-                    <p>Résultat automatique dès que tu tapes une plaque ou un VIN.</p>
-                  </div>
-                </div>
-
-                <div className="historyList">
-                  {vehicleHistoryForRequest.map((item) => (
-                    <div className="historyItem" key={`${item.sourceType}-${item.id}`}>
-                      <strong>{item.sourceType} — {item.client || "-"}</strong>
-                      <p>Plaque : {item.plaque || "-"} — VIN : {item.vin || "-"}</p>
-                      <p>{item.marque || "-"} {item.modele || ""}</p>
-                      <span>
-                        Total/prix : {item.totalTTC ? `${Number(item.totalTTC).toFixed(2)} €` : "-"}
-                        — Salarié : {item.createdByName || item.createdBy || "-"}
-                        — Statut : {item.statut || item.status || "-"}
-                      </span>
-
-                      <div className="actions" style={{ marginTop: "10px" }}>
-                        {item.sourceType === "Demande" ? (
-                          <>
-                            <button onClick={() => setSelectedDevisRequest(item)}>Afficher</button>
-                            <button onClick={() => editDevisRequest(item)}>Modifier</button>
-                            <button onClick={() => createDevisFromRequest(item)}>Ouvrir dans devis</button>
-                          </>
-                        ) : (
-                          <>
-                            <button onClick={() => setSelectedDevis(item)}>Afficher devis</button>
-                            <button onClick={() => editDevis(item)}>Modifier devis</button>
-                            <button onClick={() => printDevis(item)}>Imprimer devis</button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section className="panel stockPanel">
-              <div className="panelTitle">
-                <span>03</span>
-                <div>
-                  <h3>Liste des demandes du cahier</h3>
-                  <p>Cahier branché sur la table professionnelle Supabase. Recherche par plaque, VIN, nom, téléphone ou pièce.</p>
-                </div>
-              </div>
-
-              <section className="searchLine" style={{ marginBottom: "14px" }}>
-                <span>🔎</span>
-                <input
-                  value={devisRequestSearch}
-                  onChange={(e) => setDevisRequestSearch(e.target.value)}
-                  placeholder="Recherche : plaque, VIN, nom client, téléphone, pièce..."
-                />
-              </section>
-              <div className="actions" style={{ marginBottom: "16px" }}>
-                <button type="button" onClick={reloadCahierDevisFromDb}>Recharger Cahier/Devis</button>
-              </div>
-
-              <div className="form" style={{ marginBottom: "16px" }}>
-                <select value={devisRequestTypeFilter} onChange={(e) => setDevisRequestTypeFilter(e.target.value)}>
-                  <option>Tous</option>
-                  <option>Sur place</option>
-                  <option>Téléphone</option>
-                  <option>WhatsApp</option>
-                </select>
-
-                <select value={devisRequestUserFilter} onChange={(e) => setDevisRequestUserFilter(e.target.value)}>
-                  {devisRequestUsers.map((name) => (
-                    <option key={name}>{name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {filteredDevisRequests.length === 0 && <div className="empty">Aucune demande trouvée.</div>}
-
-              <div className="historyList">
-                {filteredDevisRequests.map((request) => {
-                  const isOwner = request.createdByLogin === currentUser?.login;
-                  return (
-                    <div
-                      className="historyItem clickable"
-                      key={request.id}
-                      onClick={() => setSelectedDevisRequest(request)}
-                      style={{ border: isOwner ? "2px solid #123f8f" : undefined }}
-                    >
-                      <strong>{request.cahierNumero || "Cahier"} — {request.type} — {request.client || "Client sans nom"}</strong>
-                      <p>Plaque : {request.plaque || "-"} — VIN : {request.vin || "-"}</p>
-                      <p>Pièces : {String(request.piecesDemandees || "-").slice(0, 140)}</p>
-                      <span>Statut : {request.statut} — Salarié : {request.createdByName || "-"} — {request.createdAt}</span>
-                      {(request.devisLignes?.length || 0) > 0 && (
-                        <div style={{ marginTop: "10px", padding: "10px", border: "1px solid #bfd4ff", borderRadius: "12px", background: "#f8fbff" }}>
-                          <strong>Détails devis complet enregistré</strong>
-                          <p>N° devis : {request.devisNumero || "-"}</p>
-                          {(request.devisLignes || []).map((line, idx) => (
-                            <p key={line.id || idx}>
-                              {idx + 1}. {line.designation || "-"} — Réf : {line.reference || "-"} — Prix : {Number(line.prixFinalTTC || line.prixTTC || 0).toFixed(2)} €
-                              — <b>{line.validationClient || (line.confirmedByClient ? "Validé client" : "Non validé client")}</b>
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                      {(request.devisArchiveComplet || request.devisLignes?.length > 0) && (
-                        <span>
-                          Devis archivé : {request.devisNumero || "-"} —
-                          Total toutes pièces : {Number(request.devisTotalToutesPiecesTTC || request.devisArchiveComplet?.totalToutesPiecesTTC || 0).toFixed(2)} € —
-                          Validé : {Number(request.devisTotalValideTTC || request.devisArchiveComplet?.totalPiecesValideesTTC || 0).toFixed(2)} €
-                        </span>
-                      )}
-                      {request.devisTotalTTC && <span>Devis dans cette demande : {request.devisNumero || "-"} — {Number(request.devisTotalTTC).toFixed(2)} €</span>}
-
-                      <div className="actions" style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => setSelectedDevisRequest(request)}>Afficher</button>
-                        <button onClick={() => editDevisRequest(request)}>Modifier</button>
-                        <button onClick={() => printDevisRequest(request)}>Imprimer</button>
-                        <button onClick={() => createDevisFromRequest(request)}>Ouvrir dans devis</button>
-                        <select
-                          value={request.statut || "À traiter"}
-                          onChange={(e) => changeDevisRequestStatus(request.id, e.target.value)}
-                          style={{ height: "40px", borderRadius: "12px", border: "1px solid #bfd4ff", padding: "0 8px" }}
-                        >
-                          <option>En attente</option>
-                          <option>Devis traité</option>
-                        </select>
-                        <button className="delete" onClick={() => deleteDevisRequest(request.id)}>Supprimer</button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          </>
-        )}
-
-
         {moduleActif === "Devis" && (
           <>
             <section className="stats">
@@ -5023,7 +3715,7 @@ export default function App() {
                 <span>01</span>
                 <div>
                   <h3>{editingDevisId ? "Modifier le devis final" : "Devis final"}</h3>
-                  <p>Ouvre une demande depuis le Cahier : les pièces demandées arrivent ici. Coche seulement les pièces validées par le client. Les pièces validées venant du stock seront retirées du stock à la validation.</p>
+                  <p>Crée un devis manuel. Coche seulement les pièces validées par le client. Les pièces validées venant du stock seront retirées du stock à la validation.</p>
                 </div>
               </div>
 
@@ -5246,7 +3938,7 @@ export default function App() {
 
               <div className="actions" style={{ marginTop: "16px" }}>
                 <button onClick={() => saveDevis("Archivé")}>
-                  {devisForm.demandeId ? "Valider devis" : "Valider devis"}
+                  "Valider devis"
                 </button>
                 <button className="delete" onClick={resetDevisDraft}>Vider devis</button>
               </div>
@@ -5370,7 +4062,7 @@ export default function App() {
                       <button type="button" onClick={autoSelectClientPaymentPieces}>
                         Auto-sélection montant
                       </button>
-                    )
+                    )}
                         {editingClientArchiveId ? (
                           <button type="button" onClick={cancelClientArchiveEdit}>Annuler modification archive</button>
                         ) : (
@@ -5601,161 +4293,6 @@ export default function App() {
               <button onClick={() => printSingleOrderArchive(selectedArchive)}>Imprimer</button>
               <button onClick={() => startEditOrderArchive(selectedArchive)}>Modifier</button>
               <button className="delete" onClick={() => deleteOrderArchive(selectedArchive.id)}>Supprimer</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedDevisRequest && (
-        <div className="modalOverlay" onClick={() => setSelectedDevisRequest(null)}>
-          <div className="modalCard" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "980px" }}>
-            <button className="modalClose" onClick={() => setSelectedDevisRequest(null)}>×</button>
-
-            <div
-              style={{
-                background: "#fff",
-                color: "#10234d",
-                borderRadius: "18px",
-                padding: "18px",
-                border: "1px solid #d9e3f2",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  borderBottom: "3px solid #123f8f",
-                  paddingBottom: "14px",
-                  marginBottom: "16px",
-                  gap: "16px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                  <img src={logo} alt={ENTREPRISE.nom} style={{ width: "76px", height: "76px", objectFit: "contain" }} />
-                  <div>
-                    <h2 style={{ margin: 0, color: "#123f8f", fontSize: "24px" }}>{ENTREPRISE.nom}</h2>
-                    <p style={{ margin: "4px 0", fontWeight: 700 }}>📍 {ENTREPRISE.adresse}</p>
-                    <p style={{ margin: "4px 0", fontWeight: 700 }}>📧 {ENTREPRISE.email}</p>
-                    <p style={{ margin: "4px 0", fontWeight: 700 }}>☎ {ENTREPRISE.telephone} — WhatsApp {ENTREPRISE.whatsapp}</p>
-                  </div>
-                </div>
-
-                <div style={{ textAlign: "right" }}>
-                  <h2 style={{ margin: 0, color: "#123f8f", fontSize: "26px" }}>DEMANDE / CAHIER</h2>
-                  <p style={{ margin: "5px 0" }}><b>N° cahier :</b> {selectedDevisRequest.cahierNumero || "-"}</p>
-                  <p style={{ margin: "5px 0" }}><b>N° devis :</b> {selectedDevisRequest.devisNumero || "-"}</p>
-                  <p style={{ margin: "5px 0" }}><b>Statut :</b> {selectedDevisRequest.statut || "-"}</p>
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
-                <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px" }}>
-                  <h3 style={{ margin: "0 0 8px", color: "#123f8f" }}>Client</h3>
-                  <p><b>Nom :</b> {selectedDevisRequest.client || "-"}</p>
-                  <p><b>Téléphone :</b> {selectedDevisRequest.telephone || "-"}</p>
-                  <p><b>WhatsApp :</b> {selectedDevisRequest.whatsapp || "-"}</p>
-                  <p><b>Type client :</b> {selectedDevisRequest.clientType || "-"}</p>
-                </div>
-
-                <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px" }}>
-                  <h3 style={{ margin: "0 0 8px", color: "#123f8f" }}>Véhicule</h3>
-                  <p><b>Plaque :</b> {selectedDevisRequest.plaque || "-"}</p>
-                  <p><b>VIN :</b> {selectedDevisRequest.vin || "-"}</p>
-                  <p><b>Marque :</b> {selectedDevisRequest.marque || "-"}</p>
-                  <p><b>Modèle :</b> {selectedDevisRequest.modele || "-"}</p>
-                </div>
-              </div>
-
-              <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px", marginBottom: "14px" }}>
-                <h3 style={{ margin: "0 0 8px", color: "#123f8f" }}>Demande initiale</h3>
-                <p><b>Origine :</b> {selectedDevisRequest.type || "-"}</p>
-                <p><b>Salarié :</b> {selectedDevisRequest.createdByName || "-"}</p>
-                <p><b>Date :</b> {selectedDevisRequest.createdAt || "-"}</p>
-                <p><b>Pièces demandées :</b></p>
-                <p style={{ whiteSpace: "pre-wrap", background: "#f8fbff", borderRadius: "10px", padding: "10px" }}>
-                  {selectedDevisRequest.piecesDemandees || "-"}
-                </p>
-              </div>
-
-              {((selectedDevisRequest.devisArchiveComplet?.lignes?.length || 0) > 0 || (selectedDevisRequest.devisLignes?.length || 0) > 0) && (
-                <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px", marginBottom: "14px" }}>
-                  <h3 style={{ margin: "0 0 10px", color: "#123f8f" }}>Devis archivé complet</h3>
-
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: "12px", overflow: "hidden" }}>
-                      <thead>
-                        <tr style={{ background: "#123f8f", color: "white" }}>
-                          <th style={{ padding: "10px", textAlign: "left" }}>N°</th>
-                          <th style={{ padding: "10px", textAlign: "left" }}>Pièce</th>
-                          <th style={{ padding: "10px", textAlign: "left" }}>Référence</th>
-                          <th style={{ padding: "10px", textAlign: "left" }}>Qté</th>
-                          <th style={{ padding: "10px", textAlign: "left" }}>Prix</th>
-                          <th style={{ padding: "10px", textAlign: "left" }}>Total</th>
-                          <th style={{ padding: "10px", textAlign: "left" }}>Validation client</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(selectedDevisRequest.devisArchiveComplet?.lignes || selectedDevisRequest.devisLignes || []).map((line, index) => (
-                          <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2" }}>
-                            <td style={{ padding: "10px", fontWeight: "900" }}>{index + 1}</td>
-                            <td style={{ padding: "10px" }}>{line.designation || "-"}</td>
-                            <td style={{ padding: "10px" }}>
-                              {line.reference || "-"}
-                              {line.reference2 && <div style={{ marginTop: "4px", color: "#64748b" }}>Offre 2 : {line.reference2}</div>}
-                            </td>
-                            <td style={{ padding: "10px" }}>{line.quantite || 1}</td>
-                            <td style={{ padding: "10px" }}>
-                              {Number(line.prixFinalTTC || line.prixTTC || 0).toFixed(2)} €
-                              {line.prixTTC2 && <div style={{ marginTop: "4px", color: "#64748b" }}>Offre 2 : {Number(line.prixTTC2 || 0).toFixed(2)} €</div>}
-                            </td>
-                            <td style={{ padding: "10px", fontWeight: "900" }}>
-                              {Number(line.totalFinalTTC || (Number(line.quantite || 0) * Number(line.prixFinalTTC || line.prixTTC || 0))).toFixed(2)} €
-                            </td>
-                            <td style={{ padding: "10px", fontWeight: "900", color: line.confirmedByClient ? "#16a34a" : "#dc2626" }}>
-                              {line.validationClient || (line.confirmedByClient ? "Validé par le client" : "Non validé par le client")}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "12px", marginTop: "14px" }}>
-                    <div style={{ background: "#f8fbff", border: "1px solid #d9e3f2", borderRadius: "12px", padding: "12px" }}>
-                      <span style={{ color: "#64748b", fontWeight: "800" }}>Total toutes pièces</span>
-                      <strong style={{ display: "block", color: "#123f8f", fontSize: "20px" }}>
-                        {Number(selectedDevisRequest.devisTotalToutesPiecesTTC || selectedDevisRequest.devisArchiveComplet?.totalToutesPiecesTTC || 0).toFixed(2)} €
-                      </strong>
-                    </div>
-
-                    <div style={{ background: "#000", color: "white", borderRadius: "12px", padding: "12px" }}>
-                      <span style={{ fontWeight: "800" }}>Total validé client</span>
-                      <strong style={{ display: "block", fontSize: "20px" }}>
-                        {Number(selectedDevisRequest.devisTotalValideTTC || selectedDevisRequest.devisArchiveComplet?.totalPiecesValideesTTC || 0).toFixed(2)} €
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ border: "1px solid #d9e3f2", borderRadius: "14px", padding: "12px", marginBottom: "14px" }}>
-                <h3 style={{ margin: "0 0 8px", color: "#123f8f" }}>Notes internes</h3>
-                <p style={{ whiteSpace: "pre-wrap" }}>{selectedDevisRequest.notesInternes || "-"}</p>
-              </div>
-
-              <div style={{ borderTop: "2px solid #123f8f", paddingTop: "10px", textAlign: "center", color: "#555", fontSize: "12px" }}>
-                {ENTREPRISE.nom} — {ENTREPRISE.adresse}<br/>
-                Email : {ENTREPRISE.email} — Téléphone : {ENTREPRISE.telephone} — WhatsApp : {ENTREPRISE.whatsapp}<br/>
-                TVA : {ENTREPRISE.tva}
-              </div>
-            </div>
-
-            <div className="actions" style={{ marginTop: "18px" }}>
-              <button onClick={() => printDevisRequest(selectedDevisRequest)}>Imprimer</button>
-              <button onClick={() => editDevisRequest(selectedDevisRequest)}>Modifier</button>
-              <button onClick={() => createDevisFromRequest(selectedDevisRequest)}>Ouvrir dans devis</button>
-              <button className="delete" onClick={() => deleteDevisRequest(selectedDevisRequest.id)}>Supprimer</button>
             </div>
           </div>
         </div>
