@@ -1277,96 +1277,18 @@ export default function App() {
     startApp();
   }, []);
 
-  // Synchronisation automatique multi-PC
-  // Fiable pour le magasin : écoute Supabase Realtime + recharge silencieuse toutes les 5 secondes.
-  useEffect(() => {
-    if (!appLoaded || !connected) return;
-
-    let cancelled = false;
-    let refreshing = false;
-    let refreshTimer = null;
-
-    async function refreshLiveData() {
-      if (refreshing || cancelled) return;
-      refreshing = true;
-
-      try {
-        const [liveStock, liveDevis, liveClients, usersResult] = await Promise.all([
-          loadStockItemsFromDb(),
-          loadDevisFromDb(),
-          loadClientsFromDb(),
-          supabase.from("users_app").select("*").order("id", { ascending: true }),
-        ]);
-
-        if (cancelled) return;
-
-        if (Array.isArray(liveStock)) setPieces(liveStock);
-        if (Array.isArray(liveDevis)) setDevis(liveDevis);
-        if (Array.isArray(liveClients)) {
-          setClients(liveClients);
-          setSelectedClient((current) => {
-            if (!current) return current;
-            return liveClients.find((client) => String(client.id) === String(current.id)) || current;
-          });
-        }
-
-        if (!usersResult.error && Array.isArray(usersResult.data) && usersResult.data.length) {
-          setUsers(usersResult.data);
-          setCurrentUser((current) => {
-            if (!current) return current;
-            return usersResult.data.find((u) => u.id === current.id || u.login === current.login) || current;
-          });
-        }
-      } catch (error) {
-        console.warn("Synchronisation automatique impossible", error);
-      } finally {
-        refreshing = false;
-      }
-    }
-
-    function scheduleRefresh() {
-      clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(refreshLiveData, 500);
-    }
-
-    const channel = supabase
-      .channel("king-live-sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "stock_items" }, scheduleRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "devis" }, scheduleRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, scheduleRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "client_pieces" }, scheduleRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "client_paiements" }, scheduleRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "users_app" }, scheduleRefresh)
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          console.info("Synchronisation temps réel active");
-        }
-      });
-
-    const interval = setInterval(refreshLiveData, 5000);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(refreshTimer);
-      clearInterval(interval);
-      supabase.removeChannel(channel);
-    };
-  }, [appLoaded, connected]);
-
   useEffect(() => {
     if (!appLoaded) return;
 
     const payload = {
       users,
-      // Les grosses données professionnelles sont maintenant dans leurs vraies tables Supabase.
-      // On évite de réécrire un énorme app_state à chaque synchronisation automatique.
-      pieces: [],
+      pieces: normalizePieces(pieces),
       history,
       manualOrders,
       orderedAutoIds,
       orderArchives,
-      devis: [],
-      clients: [],
+      devis,
+      clients,
       savedAt: new Date().toISOString(),
     };
 
@@ -1374,7 +1296,7 @@ export default function App() {
     saveAppState(payload).catch((error) => {
       console.error("Sauvegarde Supabase impossible", error);
     });
-  }, [appLoaded, users, history, manualOrders, orderedAutoIds, orderArchives]);
+  }, [appLoaded, users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, clients]);
 
   useEffect(() => {
     if (selectedClient) {
@@ -1458,22 +1380,6 @@ export default function App() {
 
   function getLineTotal(line) {
     return Number(line?.quantite || 0) * getLineUnitPrice(line);
-  }
-
-  function toggleLineConfirmedByClient(lineId) {
-    setDevisLines((prev) =>
-      prev.map((line) =>
-        line.id === lineId ? { ...line, confirmedByClient: !line.confirmedByClient } : line
-      )
-    );
-  }
-
-  function selectAllLinesConfirmedByClient() {
-    setDevisLines((prev) => prev.map((line) => ({ ...line, confirmedByClient: true })));
-  }
-
-  function clearLinesConfirmedByClient() {
-    setDevisLines((prev) => prev.map((line) => ({ ...line, confirmedByClient: false })));
   }
 
   function addHistory(action, details) {
@@ -1928,7 +1834,7 @@ export default function App() {
     }
 
     if (confirmedItems.length === 0) {
-      return alert("Coche au moins une pièce validée par le client avant de transférer au devis.");
+      return alert("Coche au moins une pièce à transférer au devis.");
     }
 
     if (!devisForm.numero) {
@@ -2155,38 +2061,34 @@ export default function App() {
           ? Number(line.prixTTC2 || 0)
           : Number(line.prixTTC || 0);
 
+      const cleanLine = { ...line };
+      delete cleanLine.confirmedByClient;
+      delete cleanLine.validationClient;
+
       return {
-        ...line,
-        validationClient: line.confirmedByClient ? "Validé par le client" : "Non validé par le client",
+        ...cleanLine,
         prixFinalTTC: unitPrice,
         totalFinalTTC: Number(line.quantite || 0) * unitPrice,
       };
     });
 
-    const confirmedLinesForDevis = allDevisLines.filter((line) => line.confirmedByClient);
-
-    if (confirmedLinesForDevis.length === 0) {
-      return alert("Coche au moins une pièce validée par le client avant de valider le devis.");
-    }
-
-    const totalConfirmedTTC = confirmedLinesForDevis.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
-    const totalConfirmedHT = totalConfirmedTTC / 1.2;
-    const tvaConfirmed = totalConfirmedTTC - totalConfirmedHT;
-    const totalAllTTC = allDevisLines.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
+    const totalDevisTTC = allDevisLines.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
+    const totalDevisHT = totalDevisTTC / 1.2;
+    const tvaDevis = totalDevisTTC - totalDevisHT;
 
     const savedDevisPayload = {
       id: editingDevisId || Date.now(),
       ...devisForm,
       numero,
-      lignes: confirmedLinesForDevis,
-      sousTotalHT: totalConfirmedHT,
-      sousTotalTTC: totalConfirmedTTC,
+      lignes: allDevisLines,
+      sousTotalHT: totalDevisHT,
+      sousTotalTTC: totalDevisTTC,
       remiseHT: 0,
       remiseTTC: 0,
-      totalHT: totalConfirmedHT,
-      tva: tvaConfirmed,
-      totalTTC: totalConfirmedTTC,
-      totalValideClientTTC: totalConfirmedTTC,
+      totalHT: totalDevisHT,
+      tva: tvaDevis,
+      totalTTC: totalDevisTTC,
+      totalValideClientTTC: totalDevisTTC,
       status: "Archivé",
       createdBy: currentUser?.name || "-",
       createdAt: editingDevisId
@@ -3294,10 +3196,6 @@ export default function App() {
       if (editingUserId) {
         const oldUser = users.find((u) => u.id === editingUserId);
 
-        if (oldUser?.login === "admin" && normalizedLogin !== "admin") {
-          return alert("L'identifiant du compte admin principal doit rester admin.");
-        }
-
         const { data: updatedUser, error } = await supabase
           .from("users_app")
           .update({
@@ -3510,16 +3408,15 @@ export default function App() {
                   <div>
                     <h3>Liste de recherche client</h3>
                     <p>
-                      Ajoute toutes les pièces trouvées ici. Ensuite coche uniquement les pièces validées par le client,
-                      puis transfère les pièces confirmées dans le devis.
+                      Ajoute toutes les pièces trouvées ici, coche celles que tu veux transférer, puis envoie-les dans le devis.
                     </p>
                   </div>
                 </div>
 
                 <div className="actions" style={{ marginBottom: "16px" }}>
-                  <button onClick={confirmAllDevisStockSelection}>Tout valider</button>
-                  <button onClick={unconfirmAllDevisStockSelection}>Tout dévalider</button>
-                  <button onClick={addSelectedPiecesToDevis}>Transférer les pièces validées au devis</button>
+                  <button onClick={confirmAllDevisStockSelection}>Tout sélectionner</button>
+                  <button onClick={unconfirmAllDevisStockSelection}>Tout désélectionner</button>
+                  <button onClick={addSelectedPiecesToDevis}>Transférer les pièces sélectionnées au devis</button>
                   <button className="delete" onClick={clearDevisStockSelection}>Vider toute la liste</button>
                 </div>
 
@@ -3536,7 +3433,7 @@ export default function App() {
                   >
                     <thead>
                       <tr style={{ background: "#123f8f", color: "white" }}>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Validé</th>
+                        <th style={{ padding: "12px", textAlign: "left" }}>Sélection</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Pièce</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Référence</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Tarif</th>
@@ -3629,11 +3526,11 @@ export default function App() {
                     <strong>{devisStockSelection.length}</strong>
                   </div>
                   <div>
-                    <span>Pièces validées</span>
+                    <span>Pièces sélectionnées</span>
                     <strong>{devisStockSelection.filter((item) => item.confirmed).length}</strong>
                   </div>
                   <div>
-                    <span>Total validé</span>
+                    <span>Total sélectionné</span>
                     <strong>
                       {devisStockSelection
                         .filter((item) => item.confirmed)
@@ -3830,7 +3727,7 @@ export default function App() {
                 <span>01</span>
                 <div>
                   <h3>{editingDevisId ? "Modifier le devis final" : "Devis final"}</h3>
-                  <p>Crée un devis manuel. Coche seulement les pièces validées par le client. Les pièces validées venant du stock seront retirées du stock à la validation.</p>
+                  <p>Crée un devis manuel simple. Toutes les lignes du tableau seront enregistrées dans le devis.</p>
                 </div>
               </div>
 
@@ -3903,9 +3800,7 @@ export default function App() {
                 <div style={{ overflowX: "auto", marginTop: "18px" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: "18px", overflow: "hidden", border: "1px solid rgba(191, 212, 255, 0.85)" }}>
                     <thead>
-                      <tr style={{ background: "#123f8f", color: "white" }}>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Validé client</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>N°</th>
+                      <tr style={{ background: "#123f8f", color: "white" }}>                        <th style={{ padding: "12px", textAlign: "left" }}>N°</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Désignation</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Référence interne</th>
                         <th style={{ padding: "12px", textAlign: "left" }}>Qté</th>
@@ -3916,20 +3811,7 @@ export default function App() {
                     </thead>
                     <tbody>
                       {devisLines.map((line, index) => (
-                        <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2", background: editingDevisLineId === line.id ? "#eaf1ff" : "white" }}>
-                          <td style={{ padding: "12px" }}>
-                            <input
-                              type="checkbox"
-                              checked={Boolean(line.confirmedByClient)}
-                              onChange={() => toggleLineConfirmedByClient(line.id)}
-                              title="Coche seulement les pièces validées par le client"
-                              style={{ width: "18px", height: "18px" }}
-                            />
-                            <div style={{ fontSize: "10px", marginTop: "4px", color: line.confirmedByClient ? "#16a34a" : "#dc2626", fontWeight: "900" }}>
-                              {line.confirmedByClient ? "Validé" : "Non validé"}
-                            </div>
-                          </td>
-                          <td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td>
+                        <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2", background: editingDevisLineId === line.id ? "#eaf1ff" : "white" }}>                          <td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td>
                           <td style={{ padding: "12px" }}>{line.designation}</td>
                           <td style={{ padding: "12px", minWidth: "260px" }}>
                             <input
@@ -4044,16 +3926,9 @@ export default function App() {
                 <div><span>Remise HT</span><strong>{devisTotals.remiseHT.toFixed(2)} €</strong></div>
                 <div><span>TVA 20%</span><strong>{devisTotals.tva.toFixed(2)} €</strong></div>
                 <div><span>Total TTC</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div>
-              </section>
-
-              <div className="actions" style={{ marginTop: "16px" }}>
-                <button type="button" onClick={selectAllLinesConfirmedByClient}>Tout valider client</button>
-                <button type="button" onClick={clearLinesConfirmedByClient}>Tout mettre non validé</button>
-              </div>
-
-              <div className="actions" style={{ marginTop: "16px" }}>
+              </section>              <div className="actions" style={{ marginTop: "16px" }}>
                 <button onClick={() => saveDevis("Archivé")}>
-                  "Valider devis"
+                  Valider devis
                 </button>
                 <button className="delete" onClick={resetDevisDraft}>Vider devis</button>
               </div>
@@ -4337,11 +4212,11 @@ export default function App() {
 
         {isAdmin && moduleActif === "Utilisateurs" && (
           <section className="panel stockPanel">
-            <div className="panelTitle"><span>01</span><div><h3>Comptes salariés</h3><p>Créer, modifier et supprimer les comptes.</p></div></div>
+            <div className="panelTitle"><span>01</span><div><h3>Comptes salariés</h3><p>Créer, modifier et supprimer les comptes. Le compte administrateur peut aussi changer de nom, identifiant et mot de passe.</p></div></div>
             {!isAdmin && <div className="empty">Seul l’administrateur peut gérer les comptes.</div>}
             {isAdmin && (
               <form className="form userForm" onSubmit={addOrUpdateUser}>
-                <input name="name" value={userForm.name} onChange={changeUserForm} placeholder="Nom du salarié" />
+                <input name="name" value={userForm.name} onChange={changeUserForm} placeholder="Nom affiché" />
                 <input name="login" value={userForm.login} onChange={changeUserForm} placeholder="Identifiant" />
                 <input name="password" value={userForm.password} onChange={changeUserForm} placeholder="Mot de passe" />
                 <select name="role" value={userForm.role} onChange={changeUserForm}><option>Salarié</option><option>Admin</option></select>
