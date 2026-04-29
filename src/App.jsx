@@ -133,7 +133,7 @@ function getSousFamillesByFamille(value) {
   return CATALOGUE[normalized] || [];
 }
 
-const MODULES = ["Stock", "Stock à commander", "Devis", "Clients", "Utilisateurs", "Historique"];
+const MODULES = ["Stock", "Stock à commander", "Clients", "Utilisateurs", "Historique"];
 
 export default function App() {
   const [connected, setConnected] = useState(() => {
@@ -1198,8 +1198,6 @@ export default function App() {
         setManualOrders(remoteState.manualOrders || []);
         setOrderedAutoIds(remoteState.orderedAutoIds || []);
         setOrderArchives(remoteState.orderArchives || []);
-        const professionalDevis = await loadDevisFromDb();
-        setDevis(Array.isArray(professionalDevis) ? professionalDevis : remoteState.devis || []);
         const professionalClients = await loadClientsFromDb();
         setClients(Array.isArray(professionalClients) ? professionalClients : remoteState.clients || []);
 
@@ -1244,7 +1242,6 @@ export default function App() {
             manualOrders: remoteState.manualOrders || [],
             orderedAutoIds: remoteState.orderedAutoIds || [],
             orderArchives: remoteState.orderArchives || [],
-            devis: remoteState.devis || [],
             clients: remoteState.clients || [],
             savedAt: new Date().toISOString(),
           })
@@ -1262,8 +1259,7 @@ export default function App() {
             setManualOrders(data.manualOrders || []);
             setOrderedAutoIds(data.orderedAutoIds || []);
             setOrderArchives(data.orderArchives || []);
-            setDevis(data.devis || []);
-                const professionalClients = await loadClientsFromDb();
+                    const professionalClients = await loadClientsFromDb();
             setClients(Array.isArray(professionalClients) ? professionalClients : data.clients || []);
           } catch {
             localStorage.removeItem("king_app_full");
@@ -1296,7 +1292,7 @@ export default function App() {
     saveAppState(payload).catch((error) => {
       console.error("Sauvegarde Supabase impossible", error);
     });
-  }, [appLoaded, users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, clients]);
+  }, [appLoaded, users, pieces, history, manualOrders, orderedAutoIds, orderArchives, clients]);
 
   useEffect(() => {
     if (selectedClient) {
@@ -1380,6 +1376,22 @@ export default function App() {
 
   function getLineTotal(line) {
     return Number(line?.quantite || 0) * getLineUnitPrice(line);
+  }
+
+  function toggleLineConfirmedByClient(lineId) {
+    setDevisLines((prev) =>
+      prev.map((line) =>
+        line.id === lineId ? { ...line, confirmedByClient: !line.confirmedByClient } : line
+      )
+    );
+  }
+
+  function selectAllLinesConfirmedByClient() {
+    setDevisLines((prev) => prev.map((line) => ({ ...line, confirmedByClient: true })));
+  }
+
+  function clearLinesConfirmedByClient() {
+    setDevisLines((prev) => prev.map((line) => ({ ...line, confirmedByClient: false })));
   }
 
   function addHistory(action, details) {
@@ -1834,7 +1846,7 @@ export default function App() {
     }
 
     if (confirmedItems.length === 0) {
-      return alert("Coche au moins une pièce à transférer au devis.");
+      return alert("Coche au moins une pièce validée par le client avant de transférer au devis.");
     }
 
     if (!devisForm.numero) {
@@ -2061,34 +2073,38 @@ export default function App() {
           ? Number(line.prixTTC2 || 0)
           : Number(line.prixTTC || 0);
 
-      const cleanLine = { ...line };
-      delete cleanLine.confirmedByClient;
-      delete cleanLine.validationClient;
-
       return {
-        ...cleanLine,
+        ...line,
+        validationClient: line.confirmedByClient ? "Validé par le client" : "Non validé par le client",
         prixFinalTTC: unitPrice,
         totalFinalTTC: Number(line.quantite || 0) * unitPrice,
       };
     });
 
-    const totalDevisTTC = allDevisLines.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
-    const totalDevisHT = totalDevisTTC / 1.2;
-    const tvaDevis = totalDevisTTC - totalDevisHT;
+    const confirmedLinesForDevis = allDevisLines.filter((line) => line.confirmedByClient);
+
+    if (confirmedLinesForDevis.length === 0) {
+      return alert("Coche au moins une pièce validée par le client avant de valider le devis.");
+    }
+
+    const totalConfirmedTTC = confirmedLinesForDevis.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
+    const totalConfirmedHT = totalConfirmedTTC / 1.2;
+    const tvaConfirmed = totalConfirmedTTC - totalConfirmedHT;
+    const totalAllTTC = allDevisLines.reduce((sum, line) => sum + Number(line.totalFinalTTC || 0), 0);
 
     const savedDevisPayload = {
       id: editingDevisId || Date.now(),
       ...devisForm,
       numero,
-      lignes: allDevisLines,
-      sousTotalHT: totalDevisHT,
-      sousTotalTTC: totalDevisTTC,
+      lignes: confirmedLinesForDevis,
+      sousTotalHT: totalConfirmedHT,
+      sousTotalTTC: totalConfirmedTTC,
       remiseHT: 0,
       remiseTTC: 0,
-      totalHT: totalDevisHT,
-      tva: tvaDevis,
-      totalTTC: totalDevisTTC,
-      totalValideClientTTC: totalDevisTTC,
+      totalHT: totalConfirmedHT,
+      tva: tvaConfirmed,
+      totalTTC: totalConfirmedTTC,
+      totalValideClientTTC: totalConfirmedTTC,
       status: "Archivé",
       createdBy: currentUser?.name || "-",
       createdAt: editingDevisId
@@ -3196,6 +3212,10 @@ export default function App() {
       if (editingUserId) {
         const oldUser = users.find((u) => u.id === editingUserId);
 
+        if (oldUser?.login === "admin" && normalizedLogin !== "admin") {
+          return alert("L'identifiant du compte admin principal doit rester admin.");
+        }
+
         const { data: updatedUser, error } = await supabase
           .from("users_app")
           .update({
@@ -3276,7 +3296,7 @@ export default function App() {
   }
 
   function exportBackup() {
-    const data = JSON.stringify({ users, pieces, history, manualOrders, orderedAutoIds, orderArchives, devis, clients, date: new Date().toLocaleString("fr-FR") }, null, 2);
+    const data = JSON.stringify({ users, pieces, history, manualOrders, orderedAutoIds, orderArchives, clients, date: new Date().toLocaleString("fr-FR") }, null, 2);
     const blob = new Blob([data], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -3297,7 +3317,6 @@ export default function App() {
         setManualOrders(data.manualOrders || []);
         setOrderedAutoIds(data.orderedAutoIds || []);
         setOrderArchives(data.orderArchives || []);
-        setDevis(data.devis || []);
         setClients(data.clients || []);
         alert("Sauvegarde restaurée avec succès.");
       } catch {
@@ -3401,155 +3420,6 @@ export default function App() {
               <div><span>À commander</span><strong>{ruptures.length}</strong></div>
               <div><span>Résultats</span><strong>{results.length}</strong></div>
             </section>
-            {devisStockSelection.length > 0 && (
-              <section className="panel" style={{ marginBottom: "22px" }}>
-                <div className="panelTitle">
-                  <span>CL</span>
-                  <div>
-                    <h3>Liste de recherche client</h3>
-                    <p>
-                      Ajoute toutes les pièces trouvées ici, coche celles que tu veux transférer, puis envoie-les dans le devis.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="actions" style={{ marginBottom: "16px" }}>
-                  <button onClick={confirmAllDevisStockSelection}>Tout sélectionner</button>
-                  <button onClick={unconfirmAllDevisStockSelection}>Tout désélectionner</button>
-                  <button onClick={addSelectedPiecesToDevis}>Transférer les pièces sélectionnées au devis</button>
-                  <button className="delete" onClick={clearDevisStockSelection}>Vider toute la liste</button>
-                </div>
-
-                <div style={{ overflowX: "auto" }}>
-                  <table
-                    style={{
-                      width: "100%",
-                      borderCollapse: "collapse",
-                      background: "white",
-                      borderRadius: "18px",
-                      overflow: "hidden",
-                      border: "1px solid rgba(191, 212, 255, 0.85)",
-                    }}
-                  >
-                    <thead>
-                      <tr style={{ background: "#123f8f", color: "white" }}>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Sélection</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Pièce</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Référence</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Tarif</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Qté</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Prix TTC</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Total</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Action</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {devisStockSelection.map((item) => (
-                        <tr
-                          key={`${item.id}-${item.priceType}`}
-                          style={{
-                            borderBottom: "1px solid #d9e3f2",
-                            background: item.confirmed ? "#eaf1ff" : "white",
-                          }}
-                        >
-                          <td style={{ padding: "12px" }}>
-                            <input
-                              type="checkbox"
-                              checked={Boolean(item.confirmed)}
-                              onChange={() => toggleConfirmDevisStockSelection(item.id, item.priceType)}
-                              style={{ width: "18px", height: "18px" }}
-                            />
-                          </td>
-
-                          <td style={{ padding: "12px", fontWeight: "900", color: "#08275f" }}>
-                            {item.designation}
-                          </td>
-
-                          <td style={{ padding: "12px" }}>
-                            {item.reference || "-"}
-                          </td>
-
-                          <td style={{ padding: "12px" }}>
-                            {item.priceType === "pro" ? "Professionnel" : "Particulier"}
-                          </td>
-
-                          <td style={{ padding: "12px", width: "90px" }}>
-                            <input
-                              value={item.quantite}
-                              onChange={(e) => updateDevisStockSelectionItem(item.id, item.priceType, "quantite", e.target.value)}
-                              style={{
-                                width: "80px",
-                                border: "1px solid #bfd4ff",
-                                borderRadius: "10px",
-                                height: "38px",
-                                padding: "0 10px",
-                              }}
-                            />
-                          </td>
-
-                          <td style={{ padding: "12px", width: "120px" }}>
-                            <input
-                              value={item.prixTTC}
-                              onChange={(e) => updateDevisStockSelectionItem(item.id, item.priceType, "prixTTC", e.target.value)}
-                              style={{
-                                width: "110px",
-                                border: "1px solid #bfd4ff",
-                                borderRadius: "10px",
-                                height: "38px",
-                                padding: "0 10px",
-                              }}
-                            />
-                          </td>
-
-                          <td style={{ padding: "12px", fontWeight: "900" }}>
-                            {(Number(item.quantite || 0) * Number(item.prixTTC || 0)).toFixed(2)} €
-                          </td>
-
-                          <td style={{ padding: "12px" }}>
-                            <button
-                              className="delete"
-                              onClick={() => removeFromDevisStockSelection(item.id, item.priceType)}
-                            >
-                              Retirer
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="stats" style={{ marginBottom: 0 }}>
-                  <div>
-                    <span>Pièces dans la liste</span>
-                    <strong>{devisStockSelection.length}</strong>
-                  </div>
-                  <div>
-                    <span>Pièces sélectionnées</span>
-                    <strong>{devisStockSelection.filter((item) => item.confirmed).length}</strong>
-                  </div>
-                  <div>
-                    <span>Total sélectionné</span>
-                    <strong>
-                      {devisStockSelection
-                        .filter((item) => item.confirmed)
-                        .reduce((sum, item) => sum + Number(item.quantite || 0) * Number(item.prixTTC || 0), 0)
-                        .toFixed(2)} €
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Total liste</span>
-                    <strong>
-                      {devisStockSelection
-                        .reduce((sum, item) => sum + Number(item.quantite || 0) * Number(item.prixTTC || 0), 0)
-                        .toFixed(2)} €
-                    </strong>
-                  </div>
-                </div>
-              </section>
-            )}
-
             <section className="contentGrid">
               <div className="panel formPanel">
                 <div className="panelTitle"><span>01</span><div><h3>{editingPieceId ? "Modifier une pièce" : "Ajouter une pièce"}</h3><p>Stock branché sur la table professionnelle Supabase stock_items. Choisis une famille puis une sous-famille.</p></div></div>
@@ -3696,12 +3566,6 @@ export default function App() {
                       <div className="stockStatus"><strong>Stock : {piece.quantite} / minimum : {piece.rupture}</strong><span className={low ? "danger" : "success"}>{low ? "À commander" : "Disponible"}</span></div>
                       <div className="actions" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => vendre(piece.id)}>Vendu - retirer 1 du stock</button>
-                        <button onClick={() => togglePieceForDevis(piece, "particulier")}>
-                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "particulier") ? "Retirer de la liste" : "Compléter devis / prix particulier"}
-                        </button>
-                        <button onClick={() => togglePieceForDevis(piece, "pro")}>
-                          {devisStockSelection.some((item) => item.id === piece.id && item.priceType === "pro") ? "Retirer prix pro" : "Compléter devis / prix professionnel"}
-                        </button>
                         <button onClick={() => startEditPiece(piece)}>Modifier</button>
                         <button className="delete" onClick={() => supprimer(piece.id)}>Supprimer</button>
                       </div>
@@ -3710,266 +3574,6 @@ export default function App() {
                 })}
               </div>
             </section>
-          </>
-        )}
-
-        {moduleActif === "Devis" && (
-          <>
-            <section className="stats">
-              <div><span>Devis enregistrés</span><strong>{devis.length}</strong></div>
-              <div><span>Lignes en cours</span><strong>{devisLines.length}</strong></div>
-              <div><span>Total TTC</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div>
-              <div><span>Mode</span><strong>{editingDevisId ? "Modification" : "Création"}</strong></div>
-            </section>
-
-            <section className="panel stockPanel">
-              <div className="panelTitle">
-                <span>01</span>
-                <div>
-                  <h3>{editingDevisId ? "Modifier le devis final" : "Devis final"}</h3>
-                  <p>Crée un devis manuel simple. Toutes les lignes du tableau seront enregistrées dans le devis.</p>
-                </div>
-              </div>
-
-              <form className="form">
-                <input name="numero" value={devisForm.numero || nextDevisNumero()} onChange={changeDevisForm} placeholder="Numéro devis" />
-                <input name="client" value={devisForm.client} onChange={changeDevisForm} placeholder="Nom client" />
-                <input name="telephone" value={devisForm.telephone || ""} onChange={changeDevisForm} placeholder="Téléphone / WhatsApp" />
-                <input name="date" type="date" value={devisForm.date} onChange={changeDevisForm} />
-                <input name="marque" value={devisForm.marque} onChange={changeDevisForm} placeholder="Marque voiture" />
-                <input name="modele" value={devisForm.modele} onChange={changeDevisForm} placeholder="Modèle voiture" />
-                <input name="plaque" value={devisForm.plaque} onChange={changeDevisForm} placeholder="Immatriculation" />
-                <input name="vin" value={devisForm.vin || ""} onChange={changeDevisForm} placeholder="VIN / numéro de châssis" />
-
-                <select name="remiseType" value={devisForm.remiseType} onChange={changeDevisForm}>
-                  <option value="pourcentage">Remise en %</option>
-                  <option value="montant">Remise en €</option>
-                </select>
-
-                <input name="remiseValue" value={devisForm.remiseValue} onChange={changeDevisForm} placeholder="Valeur remise" />
-              </form>
-
-              <div className="panel" style={{ marginTop: "18px", boxShadow: "none" }}>
-                <div className="panelTitle">
-                  <span>+</span>
-                  <div>
-                    <h3>{editingDevisLineId ? "Modifier une pièce" : "Ajouter une pièce"}</h3>
-                    <p>Référence visible dans le logiciel, cachée sur l’impression client.</p>
-                  </div>
-                </div>
-
-                <form className="form" onSubmit={addManualLineToDevis}>
-                  <input name="designation" value={devisLine.designation} onChange={changeDevisLine} placeholder="Désignation pièce" />
-                  <input name="reference" value={devisLine.reference} onChange={changeDevisLine} placeholder="Référence offre 1" />
-                  <input name="quantite" value={devisLine.quantite} onChange={changeDevisLine} placeholder="Quantité" />
-                  <input name="prixTTC" value={devisLine.prixTTC} onChange={changeDevisLine} placeholder="Prix TTC offre 1" />
-                  <input name="fournisseur1" value={devisLine.fournisseur1 || ""} onChange={changeDevisLine} placeholder="Fournisseur offre 1" />
-                  <input name="dateDispo1" value={devisLine.dateDispo1 || ""} onChange={changeDevisLine} placeholder="Disponibilité offre 1 ex: sur place" />
-
-                  <label style={{ display: "flex", alignItems: "center", gap: "10px", fontWeight: "900", color: "#123f8f" }}>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(devisLine.deuxOffres)}
-                      onChange={(e) => setDevisLine({ ...devisLine, deuxOffres: e.target.checked })}
-                      style={{ width: "18px", height: "18px" }}
-                    />
-                    Ajouter une 2ème offre fournisseur
-                  </label>
-
-                  {devisLine.deuxOffres && (
-                    <>
-                      <input name="reference2" value={devisLine.reference2 || ""} onChange={changeDevisLine} placeholder="Référence offre 2" />
-                      <input name="prixTTC2" value={devisLine.prixTTC2 || ""} onChange={changeDevisLine} placeholder="Prix TTC offre 2" />
-                      <input name="fournisseur2" value={devisLine.fournisseur2 || ""} onChange={changeDevisLine} placeholder="Fournisseur offre 2" />
-                      <input name="dateDispo2" value={devisLine.dateDispo2 || ""} onChange={changeDevisLine} placeholder="Disponibilité offre 2 ex: sous 48h" />
-                      <select name="offreChoisie" value={devisLine.offreChoisie || "offre1"} onChange={changeDevisLine}>
-                        <option value="offre1">Total avec offre 1</option>
-                        <option value="offre2">Total avec offre 2</option>
-                      </select>
-                    </>
-                  )}
-
-                  <button>{editingDevisLineId ? "Enregistrer modification" : "Ajouter au devis"}</button>
-                  {editingDevisLineId && <button type="button" onClick={cancelEditDevisLine}>Annuler</button>}
-                </form>
-              </div>
-
-              {devisLines.length === 0 && <div className="empty" style={{ marginTop: "18px" }}>Aucune pièce dans le devis.</div>}
-
-              {devisLines.length > 0 && (
-                <div style={{ overflowX: "auto", marginTop: "18px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: "18px", overflow: "hidden", border: "1px solid rgba(191, 212, 255, 0.85)" }}>
-                    <thead>
-                      <tr style={{ background: "#123f8f", color: "white" }}>                        <th style={{ padding: "12px", textAlign: "left" }}>N°</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Désignation</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Référence interne</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Qté</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Prix TTC</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Total</th>
-                        <th style={{ padding: "12px", textAlign: "left" }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {devisLines.map((line, index) => (
-                        <tr key={line.id} style={{ borderBottom: "1px solid #d9e3f2", background: editingDevisLineId === line.id ? "#eaf1ff" : "white" }}>                          <td style={{ padding: "12px", fontWeight: "900" }}>{index + 1}</td>
-                          <td style={{ padding: "12px" }}>{line.designation}</td>
-                          <td style={{ padding: "12px", minWidth: "260px" }}>
-                            <input
-                              value={line.reference || ""}
-                              onFocus={() => openStockSearchForDevisLine(line)}
-                              onChange={(e) => {
-                                updateDevisLine(line.id, "reference", e.target.value);
-                                setDevisStockSearchLineId(line.id);
-                                setDevisStockSearchText(e.target.value || line.designation || "");
-                              }}
-                              placeholder="Clique ici pour chercher dans le stock"
-                              style={{ width: "210px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }}
-                            />
-
-                            {devisStockSearchLineId === line.id && (
-                              <div
-                                style={{
-                                  marginTop: "10px",
-                                  padding: "10px",
-                                  border: "1px solid #bfd4ff",
-                                  borderRadius: "14px",
-                                  background: "#f8fbff",
-                                  minWidth: "360px",
-                                }}
-                              >
-                                <div className="form" style={{ gridTemplateColumns: "1fr auto", marginBottom: "10px" }}>
-                                  <input
-                                    value={devisStockSearchText}
-                                    onChange={(e) => setDevisStockSearchText(e.target.value)}
-                                    placeholder="Recherche stock : référence, nom, famille..."
-                                  />
-                                  <button type="button" className="delete" onClick={closeStockSearchForDevisLine}>Fermer</button>
-                                </div>
-
-                                {getStockSearchResultsForDevisLine().length === 0 && (
-                                  <div className="empty">Aucune pièce trouvée dans le stock.</div>
-                                )}
-
-                                <div className="historyList">
-                                  {getStockSearchResultsForDevisLine().map((piece) => (
-                                    <div className="historyItem" key={piece.id}>
-                                      <strong>{piece.designation}</strong>
-                                      <p>Réf interne : {piece.refInterne || "-"} — Réf origine : {piece.refOrigine || "-"}</p>
-                                      <p>Stock : {piece.quantite} — Particulier : {piece.prixPart || 0} € — Pro : {piece.prixPro || 0} €</p>
-                                      <div className="actions" style={{ marginTop: "8px" }}>
-                                        <button type="button" onClick={() => applyStockPieceToDevisLine(line.id, piece, "particulier")}>
-                                          Choisir prix particulier
-                                        </button>
-                                        <button type="button" onClick={() => applyStockPieceToDevisLine(line.id, piece, "pro")}>
-                                          Choisir prix professionnel
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {line.deuxOffres && (
-                              <input value={line.reference2 || ""} onChange={(e) => updateDevisLine(line.id, "reference2", e.target.value)} placeholder="Réf. offre 2" style={{ width: "210px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px", marginTop: "6px" }} />
-                            )}
-                          </td>
-                          <td style={{ padding: "12px" }}>
-                            <input value={line.quantite} onChange={(e) => updateDevisLine(line.id, "quantite", e.target.value)} style={{ width: "70px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }} />
-                          </td>
-                          <td style={{ padding: "12px" }}>
-                            <input value={line.prixTTC} onChange={(e) => updateDevisLine(line.id, "prixTTC", e.target.value)} placeholder="Prix offre 1" style={{ width: "90px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px" }} />
-                            {line.deuxOffres && (
-                              <>
-                                <input value={line.prixTTC2 || ""} onChange={(e) => updateDevisLine(line.id, "prixTTC2", e.target.value)} placeholder="Prix offre 2" style={{ width: "90px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 10px", marginTop: "6px" }} />
-                                <select value={line.offreChoisie || "offre1"} onChange={(e) => updateDevisLine(line.id, "offreChoisie", e.target.value)} style={{ width: "120px", border: "1px solid #bfd4ff", borderRadius: "10px", height: "36px", padding: "0 8px", marginTop: "6px" }}>
-                                  <option value="offre1">Choisir offre 1</option>
-                                  <option value="offre2">Choisir offre 2</option>
-                                </select>
-                              </>
-                            )}
-                          </td>
-                          <td style={{ padding: "12px", fontWeight: "900" }}>
-                            {line.deuxOffres ? (
-                              <div>
-                                <div>Offre 1 : {(Number(line.quantite) * Number(line.prixTTC || 0)).toFixed(2)} €</div>
-                                <div>Offre 2 : {(Number(line.quantite) * Number(line.prixTTC2 || 0)).toFixed(2)} €</div>
-                                <div style={{ color: "#123f8f", marginTop: "6px" }}>
-                                  Total choisi : {getLineTotal(line).toFixed(2)} €
-                                </div>
-                              </div>
-                            ) : (
-                              `${getLineTotal(line).toFixed(2)} €`
-                            )}
-                          </td>
-                          <td style={{ padding: "12px" }}>
-                            <div className="actions">
-                              <button onClick={() => editDevisLine(line)}>Modifier</button>
-                              {line.sourceStockId && (
-                                <button onClick={() => decreaseStockFromDevisLine(line)}>
-                                  Retirer stock
-                                </button>
-                              )}
-                              <button onClick={() => duplicateDevisLine(line)}>Dupliquer</button>
-                              <button className="delete" onClick={() => removeDevisLine(line.id)}>Supprimer</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <section className="stats">
-                <div><span>Sous-total HT</span><strong>{devisTotals.sousTotalHT.toFixed(2)} €</strong></div>
-                <div><span>Remise HT</span><strong>{devisTotals.remiseHT.toFixed(2)} €</strong></div>
-                <div><span>TVA 20%</span><strong>{devisTotals.tva.toFixed(2)} €</strong></div>
-                <div><span>Total TTC</span><strong>{devisTotals.totalTTC.toFixed(2)} €</strong></div>
-              </section>              <div className="actions" style={{ marginTop: "16px" }}>
-                <button onClick={() => saveDevis("Archivé")}>
-                  Valider devis
-                </button>
-                <button className="delete" onClick={resetDevisDraft}>Vider devis</button>
-              </div>
-            </section>
-
-            <section className="panel stockPanel">
-              <div className="panelTitle">
-                <span>02</span>
-                <div>
-                  <h3>Devis enregistrés</h3>
-                  <p>Devis branché sur la table professionnelle Supabase. Modifier, supprimer ou imprimer à tout moment.</p>
-                </div>
-              </div>
-
-              <section className="searchLine" style={{ marginBottom: "14px" }}>
-                <span>🔎</span>
-                <input
-                  value={devisSearch}
-                  onChange={(e) => setDevisSearch(e.target.value)}
-                  placeholder="Rechercher un devis : plaque, VIN, nom client, téléphone, numéro..."
-                />
-              </section>
-
-              {filteredDevis.length === 0 && <div className="empty">Aucun devis trouvé.</div>}
-
-              <div className="historyList">
-                {filteredDevis.map((d) => (
-                  <div className="historyItem clickable" key={d.id} onClick={() => setSelectedDevis(d)}>
-                    <strong>{d.numero} — {d.client}</strong>
-                    <p>{d.marque} {d.modele} — Plaque : {d.plaque || "-"} — VIN : {d.vin || "-"}</p>
-                    <span>{d.status} — TTC : {Number(d.totalTTC).toFixed(2)} € — {d.createdAt}</span>
-                    <div className="actions" style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => printDevis(d)}>Imprimer</button>
-                      <button onClick={() => editDevis(d)}>Modifier</button>
-                      <button className="delete" onClick={() => deleteDevis(d.id)}>Supprimer</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
           </>
         )}
 
@@ -4212,11 +3816,11 @@ export default function App() {
 
         {isAdmin && moduleActif === "Utilisateurs" && (
           <section className="panel stockPanel">
-            <div className="panelTitle"><span>01</span><div><h3>Comptes salariés</h3><p>Créer, modifier et supprimer les comptes. Le compte administrateur peut aussi changer de nom, identifiant et mot de passe.</p></div></div>
+            <div className="panelTitle"><span>01</span><div><h3>Comptes salariés</h3><p>Créer, modifier et supprimer les comptes.</p></div></div>
             {!isAdmin && <div className="empty">Seul l’administrateur peut gérer les comptes.</div>}
             {isAdmin && (
               <form className="form userForm" onSubmit={addOrUpdateUser}>
-                <input name="name" value={userForm.name} onChange={changeUserForm} placeholder="Nom affiché" />
+                <input name="name" value={userForm.name} onChange={changeUserForm} placeholder="Nom du salarié" />
                 <input name="login" value={userForm.login} onChange={changeUserForm} placeholder="Identifiant" />
                 <input name="password" value={userForm.password} onChange={changeUserForm} placeholder="Mot de passe" />
                 <select name="role" value={userForm.role} onChange={changeUserForm}><option>Salarié</option><option>Admin</option></select>
@@ -4283,35 +3887,6 @@ export default function App() {
               <button onClick={() => printSingleOrderArchive(selectedArchive)}>Imprimer</button>
               <button onClick={() => startEditOrderArchive(selectedArchive)}>Modifier</button>
               <button className="delete" onClick={() => deleteOrderArchive(selectedArchive.id)}>Supprimer</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedDevis && (
-        <div className="modalOverlay" onClick={() => setSelectedDevis(null)}>
-          <div className="modalCard" onClick={(e) => e.stopPropagation()}>
-            <button className="modalClose" onClick={() => setSelectedDevis(null)}>×</button>
-            <h2>{selectedDevis.numero}</h2>
-            <div className="modalGrid">
-              <p><b>Client :</b> {selectedDevis.client}</p><p><b>Date :</b> {selectedDevis.date}</p>
-              <p><b>Véhicule :</b> {selectedDevis.marque} {selectedDevis.modele}</p><p><b>Plaque :</b> {selectedDevis.plaque}</p><p><b>VIN :</b> {selectedDevis.vin || "-"}</p><p><b>Téléphone :</b> {selectedDevis.telephone || "-"}</p><p><b>Origine :</b> {selectedDevis.origineDemande || "-"}</p>
-              <p><b>Sous-total HT :</b> {Number(selectedDevis.sousTotalHT || selectedDevis.totalHT).toFixed(2)} €</p>
-              <p><b>Remise HT :</b> {Number(selectedDevis.remiseHT || 0).toFixed(2)} €</p>
-              <p><b>TVA :</b> {Number(selectedDevis.tva).toFixed(2)} €</p><p><b>Total TTC :</b> {Number(selectedDevis.totalTTC).toFixed(2)} €</p>
-              <p><b>Statut :</b> {selectedDevis.status}</p>
-            </div>
-            <div className="actions" style={{ marginTop: "18px" }}>
-              <button onClick={() => printDevis(selectedDevis)}>Imprimer</button>
-              <button onClick={() => editDevis(selectedDevis)}>Modifier</button>
-              <button className="delete" onClick={() => deleteDevis(selectedDevis.id)}>Supprimer</button>
-            </div>
-            <div className="historyList" style={{ marginTop: "18px" }}>
-              {selectedDevis.lignes.map((l) => (
-                <div className="historyItem" key={l.id}>
-                  <strong>{l.designation}</strong><p>Qté : {l.quantite} — Prix TTC : {(l.deuxOffres && l.offreChoisie === "offre2" ? Number(l.prixTTC2 || 0) : Number(l.prixTTC || 0)).toFixed(2)} €</p><span>Référence interne : {l.reference || "-"}</span>
-                </div>
-              ))}
             </div>
           </div>
         </div>
